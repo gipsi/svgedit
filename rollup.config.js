@@ -1,15 +1,16 @@
 /* eslint-env node */
+// Wait until Node 10 to enable
+/* eslint-disable prefer-named-capture-group */
 
 // NOTE:
 // See rollup-config.config.js instead for building the main (configurable)
 //   user entrance file
+import {join, basename} from 'path';
+import {lstatSync, readdirSync, copyFileSync} from 'fs';
 
 import babel from 'rollup-plugin-babel';
 import {terser} from 'rollup-plugin-terser';
 import replace from 'rollup-plugin-re';
-
-const {lstatSync, readdirSync} = require('fs'); // eslint-disable-line import/no-commonjs
-const {join, basename} = require('path'); // eslint-disable-line import/no-commonjs
 
 const localeFiles = readdirSync('editor/locale');
 const extensionFiles = readdirSync('editor/extensions');
@@ -35,9 +36,9 @@ extensionLocaleDirs.forEach((dir) => {
  */
 
 /**
- * @param {PlainObject} config
- * @param {boolean} config.minifying
- * @param {string} [config.format='umd'} = {}]
+ * @param {PlainObject} [config={}]
+ * @param {boolean} [config.minifying]
+ * @param {string} [config.format='umd']
  * @returns {external:RollupConfig}
  */
 function getRollupObject ({minifying, format = 'umd'} = {}) {
@@ -180,6 +181,13 @@ export default [
     };
   }),
   ...extensionFiles.map((extensionFile) => {
+    if (extensionFile.match(/\.php$/)) {
+      copyFileSync(
+        join('editor/extensions', extensionFile),
+        join('dist/extensions', extensionFile)
+      );
+      return undefined;
+    }
     // ext-*.js
     const extensionName = extensionFile.match(/^ext-(.+?)\.js$/);
     if (!extensionName) {

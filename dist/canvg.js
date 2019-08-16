@@ -1,6 +1,20 @@
 var canvg = (function (exports) {
   'use strict';
 
+  function _typeof(obj) {
+    if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") {
+      _typeof = function (obj) {
+        return typeof obj;
+      };
+    } else {
+      _typeof = function (obj) {
+        return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+      };
+    }
+
+    return _typeof(obj);
+  }
+
   function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
     try {
       var info = gen[key](arg);
@@ -120,6 +134,44 @@ var canvg = (function (exports) {
     return _construct.apply(null, arguments);
   }
 
+  function _isNativeFunction(fn) {
+    return Function.toString.call(fn).indexOf("[native code]") !== -1;
+  }
+
+  function _wrapNativeSuper(Class) {
+    var _cache = typeof Map === "function" ? new Map() : undefined;
+
+    _wrapNativeSuper = function _wrapNativeSuper(Class) {
+      if (Class === null || !_isNativeFunction(Class)) return Class;
+
+      if (typeof Class !== "function") {
+        throw new TypeError("Super expression must either be null or a function");
+      }
+
+      if (typeof _cache !== "undefined") {
+        if (_cache.has(Class)) return _cache.get(Class);
+
+        _cache.set(Class, Wrapper);
+      }
+
+      function Wrapper() {
+        return _construct(Class, arguments, _getPrototypeOf(this).constructor);
+      }
+
+      Wrapper.prototype = Object.create(Class.prototype, {
+        constructor: {
+          value: Wrapper,
+          enumerable: false,
+          writable: true,
+          configurable: true
+        }
+      });
+      return _setPrototypeOf(Wrapper, Class);
+    };
+
+    return _wrapNativeSuper(Class);
+  }
+
   function _assertThisInitialized(self) {
     if (self === void 0) {
       throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
@@ -222,6 +274,71 @@ var canvg = (function (exports) {
 
   function _nonIterableRest() {
     throw new TypeError("Invalid attempt to destructure non-iterable instance");
+  }
+
+  function _wrapRegExp(re, groups) {
+    _wrapRegExp = function (re, groups) {
+      return new BabelRegExp(re, groups);
+    };
+
+    var _RegExp = _wrapNativeSuper(RegExp);
+
+    var _super = RegExp.prototype;
+
+    var _groups = new WeakMap();
+
+    function BabelRegExp(re, groups) {
+      var _this = _RegExp.call(this, re);
+
+      _groups.set(_this, groups);
+
+      return _this;
+    }
+
+    _inherits(BabelRegExp, _RegExp);
+
+    BabelRegExp.prototype.exec = function (str) {
+      var result = _super.exec.call(this, str);
+
+      if (result) result.groups = buildGroups(result, this);
+      return result;
+    };
+
+    BabelRegExp.prototype[Symbol.replace] = function (str, substitution) {
+      if (typeof substitution === "string") {
+        var groups = _groups.get(this);
+
+        return _super[Symbol.replace].call(this, str, substitution.replace(/\$<([^>]+)>/g, function (_, name) {
+          return "$" + groups[name];
+        }));
+      } else if (typeof substitution === "function") {
+        var _this = this;
+
+        return _super[Symbol.replace].call(this, str, function () {
+          var args = [];
+          args.push.apply(args, arguments);
+
+          if (typeof args[args.length - 1] !== "object") {
+            args.push(buildGroups(args, _this));
+          }
+
+          return substitution.apply(this, args);
+        });
+      } else {
+        return _super[Symbol.replace].call(this, str, substitution);
+      }
+    };
+
+    function buildGroups(result, re) {
+      var g = _groups.get(re);
+
+      return Object.keys(g).reduce(function (groups, name) {
+        groups[name] = result[g[name]];
+        return groups;
+      }, Object.create(null));
+    }
+
+    return _wrapRegExp.apply(this, arguments);
   }
 
   /**
@@ -378,7 +495,11 @@ var canvg = (function (exports) {
   }; // array of color definition objects
 
   var colorDefs = [{
-    re: /^rgb\((\d{1,3}),\s*(\d{1,3}),\s*(\d{1,3})\)$/,
+    re: _wrapRegExp(/^rgb\((\d{1,3}),\s*(\d{1,3}),\s*(\d{1,3})\)$/, {
+      r: 1,
+      g: 2,
+      b: 3
+    }),
     example: ['rgb(123, 234, 45)', 'rgb(255,234,245)'],
     process: function process(_) {
       for (var _len = arguments.length, bits = new Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
@@ -390,7 +511,11 @@ var canvg = (function (exports) {
       });
     }
   }, {
-    re: /^(\w{2})(\w{2})(\w{2})$/,
+    re: _wrapRegExp(/^(\w{2})(\w{2})(\w{2})$/, {
+      r: 1,
+      g: 2,
+      b: 3
+    }),
     example: ['#00ff00', '336699'],
     process: function process(_) {
       for (var _len2 = arguments.length, bits = new Array(_len2 > 1 ? _len2 - 1 : 0), _key2 = 1; _key2 < _len2; _key2++) {
@@ -402,7 +527,11 @@ var canvg = (function (exports) {
       });
     }
   }, {
-    re: /^(\w{1})(\w{1})(\w{1})$/,
+    re: _wrapRegExp(/^(\w{1})(\w{1})(\w{1})$/, {
+      r: 1,
+      g: 2,
+      b: 3
+    }),
     example: ['#fb0', 'f0f'],
     process: function process(_) {
       for (var _len3 = arguments.length, bits = new Array(_len3 > 1 ? _len3 - 1 : 0), _key3 = 1; _key3 < _len3; _key3++) {
@@ -465,7 +594,7 @@ var canvg = (function (exports) {
           });
           _this.ok = true;
         }
-      }, this); // validate/cleanup values
+      }); // validate/cleanup values
 
       this.r = this.r < 0 || isNaN(this.r) ? 0 : this.r > 255 ? 255 : this.r;
       this.g = this.g < 0 || isNaN(this.g) ? 0 : this.g > 255 ? 255 : this.g;
@@ -507,36 +636,60 @@ var canvg = (function (exports) {
 
         return '#' + r + g + b;
       }
+      /**
+      * Offers a bulleted list of help.
+      * @returns {HTMLUListElement}
+      */
+
+    }], [{
+      key: "getHelpXML",
+      value: function getHelpXML() {
+        var examples = [].concat(_toConsumableArray(colorDefs.flatMap(function (_ref2) {
+          var example = _ref2.example;
+          return example;
+        })), _toConsumableArray(Object.keys(simpleColors)));
+        var xml = document.createElement('ul');
+        xml.setAttribute('id', 'rgbcolor-examples');
+        xml.append.apply(xml, _toConsumableArray(examples.map(function (example) {
+          try {
+            var listItem = document.createElement('li');
+            var listColor = new RGBColor(example);
+            var exampleDiv = document.createElement('div');
+            exampleDiv.style.cssText = "\n  margin: 3px;\n  border: 1px solid black;\n  background: ".concat(listColor.toHex(), ";\n  color: ").concat(listColor.toHex(), ";");
+            exampleDiv.append('test');
+            var listItemValue = " ".concat(example, " -> ").concat(listColor.toRGB(), " -> ").concat(listColor.toHex());
+            listItem.append(exampleDiv, listItemValue);
+            return listItem;
+          } catch (e) {
+            return '';
+          }
+        })));
+        return xml;
+      }
     }]);
 
     return RGBColor;
   }();
 
-  RGBColor.getHelpXML = function () {
-    var examples = _toConsumableArray(colorDefs.flatMap(function (_ref2) {
-      var example = _ref2.example;
-      return example;
-    })).concat(_toConsumableArray(Object.keys(simpleColors)));
+  function _typeof$1(obj) {
+    if (typeof Symbol === "function" && _typeof(Symbol.iterator) === "symbol") {
+      _typeof$1 = function _typeof$1(obj) {
+        return _typeof(obj);
+      };
+    } else {
+      _typeof$1 = function _typeof$1(obj) {
+        return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : _typeof(obj);
+      };
+    }
 
-    var xml = document.createElement('ul');
-    xml.setAttribute('id', 'rgbcolor-examples');
-    xml.append.apply(xml, _toConsumableArray(examples.map(function (example) {
-      try {
-        var listItem = document.createElement('li');
-        var listColor = new RGBColor(example);
-        var exampleDiv = document.createElement('div');
-        exampleDiv.style.cssText = "\nmargin: 3px;\nborder: 1px solid black;\nbackground: ".concat(listColor.toHex(), ";\ncolor: ").concat(listColor.toHex(), ";");
-        exampleDiv.append('test');
-        var listItemValue = " ".concat(example, " -> ").concat(listColor.toRGB(), " -> ").concat(listColor.toHex());
-        listItem.append(exampleDiv, listItemValue);
-        return listItem;
-      } catch (e) {
-        return '';
-      }
-    })));
-    return xml;
-  };
+    return _typeof$1(obj);
+  }
 
+  function _classCallCheck$1(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
   /**
   * StackBlur - a fast almost Gaussian Blur For Canvas
   *
@@ -576,6 +729,8 @@ var canvg = (function (exports) {
   * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
   * OTHER DEALINGS IN THE SOFTWARE.
   */
+
+
   var mulTable = [512, 512, 456, 512, 328, 456, 335, 512, 405, 328, 271, 456, 388, 335, 292, 512, 454, 405, 364, 328, 298, 271, 496, 456, 420, 388, 360, 335, 312, 292, 273, 512, 482, 454, 428, 405, 383, 364, 345, 328, 312, 298, 284, 271, 259, 496, 475, 456, 437, 420, 404, 388, 374, 360, 347, 335, 323, 312, 302, 292, 282, 273, 265, 512, 497, 482, 468, 454, 441, 428, 417, 405, 394, 383, 373, 364, 354, 345, 337, 328, 320, 312, 305, 298, 291, 284, 278, 271, 265, 259, 507, 496, 485, 475, 465, 456, 446, 437, 428, 420, 412, 404, 396, 388, 381, 374, 367, 360, 354, 347, 341, 335, 329, 323, 318, 312, 307, 302, 297, 292, 287, 282, 278, 273, 269, 265, 261, 512, 505, 497, 489, 482, 475, 468, 461, 454, 447, 441, 435, 428, 422, 417, 411, 405, 399, 394, 389, 383, 378, 373, 368, 364, 359, 354, 350, 345, 341, 337, 332, 328, 324, 320, 316, 312, 309, 305, 301, 298, 294, 291, 287, 284, 281, 278, 274, 271, 268, 265, 262, 259, 257, 507, 501, 496, 491, 485, 480, 475, 470, 465, 460, 456, 451, 446, 442, 437, 433, 428, 424, 420, 416, 412, 408, 404, 400, 396, 392, 388, 385, 381, 377, 374, 370, 367, 363, 360, 357, 354, 350, 347, 344, 341, 338, 335, 332, 329, 326, 323, 320, 318, 315, 312, 310, 307, 304, 302, 299, 297, 294, 292, 289, 287, 285, 282, 280, 278, 275, 273, 271, 269, 267, 265, 263, 261, 259];
   var shgTable = [9, 11, 12, 13, 13, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24];
   /**
@@ -584,7 +739,7 @@ var canvg = (function (exports) {
    * @param {Integer} topY
    * @param {Integer} width
    * @param {Integer} height
-   * @throws {Error}
+   * @throws {Error|TypeError}
    * @returns {ImageData} See {@link https://html.spec.whatwg.org/multipage/canvas.html#imagedata}
    */
 
@@ -594,8 +749,8 @@ var canvg = (function (exports) {
       canvas = document.getElementById(canvas);
     }
 
-    if (!canvas || !('getContext' in canvas)) {
-      return;
+    if (!canvas || _typeof$1(canvas) !== 'object' || !('getContext' in canvas)) {
+      throw new TypeError('Expecting canvas with `getContext` method in processCanvasRGB(A) calls!');
     }
 
     var context = canvas.getContext('2d');
@@ -641,7 +796,7 @@ var canvg = (function (exports) {
   function processImageDataRGBA(imageData, topX, topY, width, height, radius) {
     var pixels = imageData.data;
     var x, y, i, p, yp, yi, yw, rSum, gSum, bSum, aSum, rOutSum, gOutSum, bOutSum, aOutSum, rInSum, gInSum, bInSum, aInSum, pr, pg, pb, pa, rbs;
-    var div = radius + radius + 1; // const w4 = width << 2;
+    var div = 2 * radius + 1; // const w4 = width << 2;
 
     var widthMinus1 = width - 1;
     var heightMinus1 = height - 1;
@@ -839,7 +994,7 @@ var canvg = (function (exports) {
 
 
   var BlurStack = function BlurStack() {
-    _classCallCheck(this, BlurStack);
+    _classCallCheck$1(this, BlurStack);
 
     this.r = 0;
     this.g = 0;
@@ -850,7 +1005,7 @@ var canvg = (function (exports) {
 
   /**
    * Whether a value is `null` or `undefined`.
-   * @param {Any} val
+   * @param {any} val
    * @returns {boolean}
    */
 
@@ -884,7 +1039,7 @@ var canvg = (function (exports) {
   * @param {HTMLCanvasElement|string} target canvas element or the id of a canvas element
   * @param {string|XMLDocument} s - svg string, url to svg file, or xml document
   * @param {module:canvg.CanvgOptions} [opts] Optional hash of options
-  * @returns {Promise} All the function after the first render is completed with dom
+  * @returns {Promise<XMLDocument|XMLDocument[]>} All the function after the first render is completed with dom
   */
 
 
@@ -931,13 +1086,16 @@ var canvg = (function (exports) {
 
     return svg.load(ctx, s);
   };
+  /* eslint-disable jsdoc/check-types */
+
   /**
   * @param {module:canvg.CanvgOptions} opts
-  * @returns {Object}
+  * @returns {object}
   * @todo Flesh out exactly what object is returned here (after updating to latest and reincluding our changes here and those of StackBlur)
   */
 
   function build(opts) {
+    /* eslint-enable jsdoc/check-types */
     var svg = {
       opts: opts
     };
@@ -3190,7 +3348,7 @@ var canvg = (function (exports) {
         _classCallCheck(this, _class22);
 
         _this12 = _possibleConstructorReturn(this, _getPrototypeOf(_class22).call(this, node));
-        svg.Animations.push(_assertThisInitialized(_assertThisInitialized(_this12)));
+        svg.Animations.push(_assertThisInitialized(_this12));
         _this12.duration = 0.0;
         _this12.begin = _this12.attribute('begin').toMilliseconds();
         _this12.maxDuration = _this12.begin + _this12.attribute('dur').toMilliseconds();
@@ -3408,7 +3566,7 @@ var canvg = (function (exports) {
             _this13.fontFace = child;
 
             if (child.style('font-family').hasValue()) {
-              svg.Definitions[child.style('font-family').value] = _assertThisInitialized(_assertThisInitialized(_this13));
+              svg.Definitions[child.style('font-family').value] = _assertThisInitialized(_this13);
             }
           } else if (child.type === 'missing-glyph') {
             _this13.missingGlyph = child;
@@ -3851,7 +4009,7 @@ var canvg = (function (exports) {
         }
 
         _this20._isSvg = href.match(/\.svg$/);
-        svg.Images.push(_assertThisInitialized(_assertThisInitialized(_this20)));
+        svg.Images.push(_assertThisInitialized(_this20));
         _this20.loaded = false;
 
         if (!_this20._isSvg) {
@@ -3876,7 +4034,7 @@ var canvg = (function (exports) {
             // eslint-disable-line promise/prefer-await-to-then, promise/always-return
             _this20.img = img;
             _this20.loaded = true;
-          }).catch(function (err) {
+          })["catch"](function (err) {
             // eslint-disable-line promise/prefer-await-to-callbacks
             _this20.erred = true;
             console.error('Ajax error for canvg', err); // eslint-disable-line no-console
@@ -3985,12 +4143,13 @@ var canvg = (function (exports) {
         _toConsumableArray(node.childNodes).forEach(function (_ref11) {
           var nodeValue = _ref11.nodeValue;
           css += nodeValue;
-        });
+        }); // remove comments
 
-        css = css.replace(/(\/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\/)|(^[\s]*\/\/.*)/gm, ''); // remove comments
 
-        css = svg.compressSpaces(css); // replace whitespace
+        css = css.replace(/(\/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\/)|(^[\s]*\/\/.*)/gm, ''); // eslint-disable-line unicorn/no-unsafe-regex
+        // replace whitespace
 
+        css = svg.compressSpaces(css);
         var cssDefs = css.split('}');
         cssDefs.forEach(function (cssDef) {
           if (svg.trim(cssDef) !== '') {
@@ -4323,7 +4482,7 @@ var canvg = (function (exports) {
     * @param {Float} width
     * @param {Float} height
     * @param {Integer} rgba
-    * @returns {undefined}
+    * @returns {Integer}
     */
 
 
@@ -4338,7 +4497,7 @@ var canvg = (function (exports) {
     * @param {Float} height
     * @param {Integer} rgba
     * @param {Float} val
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -4544,7 +4703,7 @@ var canvg = (function (exports) {
                 return _context.stop();
             }
           }
-        }, _callee, this);
+        }, _callee);
       }));
 
       return function (_x2, _x3) {

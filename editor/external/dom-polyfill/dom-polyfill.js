@@ -8,7 +8,7 @@
  *
  * @param {Node} o
  * @param {module:DOMPolyfill~ParentNode|module:DOMPolyfill~ChildNode} ps
- * @returns {undefined}
+ * @returns {void}
  */
 function mixin (o, ps) {
   if (!o) return;
@@ -34,7 +34,8 @@ function mixin (o, ps) {
  */
 function convertNodesIntoANode (nodes) {
   nodes = nodes.map((node) => {
-    return !(node instanceof Node) ? document.createTextNode(node) : node;
+    const isNode = node && typeof node === 'object' && 'nodeType' in node;
+    return isNode ? node : document.createTextNode(node);
   });
   if (nodes.length === 1) {
     return nodes[0];
@@ -107,7 +108,7 @@ const ChildNode = {
   },
   remove () {
     if (!this.parentNode) { return; }
-    this.parentNode.removeChild(this);
+    this.parentNode.removeChild(this); // eslint-disable-line unicorn/prefer-node-remove
   }
 };
 

@@ -122,6 +122,74 @@
     return _setPrototypeOf(o, p);
   }
 
+  function isNativeReflectConstruct() {
+    if (typeof Reflect === "undefined" || !Reflect.construct) return false;
+    if (Reflect.construct.sham) return false;
+    if (typeof Proxy === "function") return true;
+
+    try {
+      Date.prototype.toString.call(Reflect.construct(Date, [], function () {}));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function _construct(Parent, args, Class) {
+    if (isNativeReflectConstruct()) {
+      _construct = Reflect.construct;
+    } else {
+      _construct = function _construct(Parent, args, Class) {
+        var a = [null];
+        a.push.apply(a, args);
+        var Constructor = Function.bind.apply(Parent, a);
+        var instance = new Constructor();
+        if (Class) _setPrototypeOf(instance, Class.prototype);
+        return instance;
+      };
+    }
+
+    return _construct.apply(null, arguments);
+  }
+
+  function _isNativeFunction(fn) {
+    return Function.toString.call(fn).indexOf("[native code]") !== -1;
+  }
+
+  function _wrapNativeSuper(Class) {
+    var _cache = typeof Map === "function" ? new Map() : undefined;
+
+    _wrapNativeSuper = function _wrapNativeSuper(Class) {
+      if (Class === null || !_isNativeFunction(Class)) return Class;
+
+      if (typeof Class !== "function") {
+        throw new TypeError("Super expression must either be null or a function");
+      }
+
+      if (typeof _cache !== "undefined") {
+        if (_cache.has(Class)) return _cache.get(Class);
+
+        _cache.set(Class, Wrapper);
+      }
+
+      function Wrapper() {
+        return _construct(Class, arguments, _getPrototypeOf(this).constructor);
+      }
+
+      Wrapper.prototype = Object.create(Class.prototype, {
+        constructor: {
+          value: Wrapper,
+          enumerable: false,
+          writable: true,
+          configurable: true
+        }
+      });
+      return _setPrototypeOf(Wrapper, Class);
+    };
+
+    return _wrapNativeSuper(Class);
+  }
+
   function _assertThisInitialized(self) {
     if (self === void 0) {
       throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
@@ -196,12 +264,77 @@
     throw new TypeError("Invalid attempt to destructure non-iterable instance");
   }
 
+  function _wrapRegExp(re, groups) {
+    _wrapRegExp = function (re, groups) {
+      return new BabelRegExp(re, groups);
+    };
+
+    var _RegExp = _wrapNativeSuper(RegExp);
+
+    var _super = RegExp.prototype;
+
+    var _groups = new WeakMap();
+
+    function BabelRegExp(re, groups) {
+      var _this = _RegExp.call(this, re);
+
+      _groups.set(_this, groups);
+
+      return _this;
+    }
+
+    _inherits(BabelRegExp, _RegExp);
+
+    BabelRegExp.prototype.exec = function (str) {
+      var result = _super.exec.call(this, str);
+
+      if (result) result.groups = buildGroups(result, this);
+      return result;
+    };
+
+    BabelRegExp.prototype[Symbol.replace] = function (str, substitution) {
+      if (typeof substitution === "string") {
+        var groups = _groups.get(this);
+
+        return _super[Symbol.replace].call(this, str, substitution.replace(/\$<([^>]+)>/g, function (_, name) {
+          return "$" + groups[name];
+        }));
+      } else if (typeof substitution === "function") {
+        var _this = this;
+
+        return _super[Symbol.replace].call(this, str, function () {
+          var args = [];
+          args.push.apply(args, arguments);
+
+          if (typeof args[args.length - 1] !== "object") {
+            args.push(buildGroups(args, _this));
+          }
+
+          return substitution.apply(this, args);
+        });
+      } else {
+        return _super[Symbol.replace].call(this, str, substitution);
+      }
+    };
+
+    function buildGroups(result, re) {
+      var g = _groups.get(re);
+
+      return Object.keys(g).reduce(function (groups, name) {
+        groups[name] = result[g[name]];
+        return groups;
+      }, Object.create(null));
+    }
+
+    return _wrapRegExp.apply(this, arguments);
+  }
+
   // http://ross.posterous.com/2008/08/19/iphone-touch-events-in-javascript/
 
   /**
    *
    * @param {Event} ev
-   * @returns {undefined}
+   * @returns {void}
    */
   function touchHandler(ev) {
     var changedTouches = ev.changedTouches,
@@ -2562,6 +2695,22 @@
             }
 
             return builder.pathSegList;
+          } // STATIC
+
+        }], [{
+          key: "_pathSegArrayAsString",
+          value: function _pathSegArrayAsString(pathSegArray) {
+            var string = '';
+            var first = true;
+            pathSegArray.forEach(function (pathSeg) {
+              if (first) {
+                first = false;
+                string += pathSeg._asPathString();
+              } else {
+                string += ' ' + pathSeg._asPathString();
+              }
+            });
+            return string;
           }
         }]);
 
@@ -2576,23 +2725,8 @@
           return this._list.length;
         },
         enumerable: true
-      });
-
-      SVGPathSegList._pathSegArrayAsString = function (pathSegArray) {
-        var string = '';
-        var first = true;
-        pathSegArray.forEach(function (pathSeg) {
-          if (first) {
-            first = false;
-            string += pathSeg._asPathString();
-          } else {
-            string += ' ' + pathSeg._asPathString();
-          }
-        });
-        return string;
-      }; // Add the pathSegList accessors to SVGPathElement.
+      }); // Add the pathSegList accessors to SVGPathElement.
       // Spec: https://www.w3.org/TR/SVG11/single-page.html#paths-InterfaceSVGAnimatedPathData
-
 
       Object.defineProperties(SVGPathElement.prototype, {
         pathSegList: {
@@ -2629,7 +2763,6 @@
     }
   })();
 
-  /* globals jQuery */
   var $ = jQuery;
 
   var supportsSVG_ = function () {
@@ -2761,9 +2894,14 @@
     var rxform = rect.transform.baseVal;
     var t1 = svg.createSVGTransform();
     rxform.appendItem(t1);
-    var r1 = rxform.getItem(0); // Todo: Do frame-independent instance checking
+    var r1 = rxform.getItem(0);
 
-    return r1 instanceof SVGTransform && t1 instanceof SVGTransform && r1.type === t1.type && r1.angle === t1.angle && r1.matrix.a === t1.matrix.a && r1.matrix.b === t1.matrix.b && r1.matrix.c === t1.matrix.c && r1.matrix.d === t1.matrix.d && r1.matrix.e === t1.matrix.e && r1.matrix.f === t1.matrix.f;
+    var isSVGTransform = function isSVGTransform(o) {
+      // https://developer.mozilla.org/en-US/docs/Web/API/SVGTransform
+      return o && _typeof(o) === 'object' && typeof o.setMatrix === 'function' && 'angle' in o;
+    };
+
+    return isSVGTransform(r1) && isSVGTransform(t1) && r1.type === t1.type && r1.angle === t1.angle && r1.matrix.a === t1.matrix.a && r1.matrix.b === t1.matrix.b && r1.matrix.c === t1.matrix.c && r1.matrix.d === t1.matrix.d && r1.matrix.e === t1.matrix.e && r1.matrix.f === t1.matrix.f;
   }(); // Public API
 
   /**
@@ -2920,12 +3058,12 @@
     var proxied = $.fn.attr,
         svgns = 'http://www.w3.org/2000/svg';
     /**
-    * @typedef {PlainObject.<string, string|Float>} module:jQueryAttr.Attributes
+    * @typedef {PlainObject<string, string|Float>} module:jQueryAttr.Attributes
     */
 
     /**
     * @function external:jQuery.fn.attr
-    * @param {string|string[]|PlainObject.<string, string>} key
+    * @param {string|string[]|PlainObject<string, string>} key
     * @param {string} value
     * @returns {external:jQuery|module:jQueryAttr.Attributes}
     */
@@ -2965,12 +3103,10 @@
 
           if (_typeof(key) === 'object') {
             // Setting attributes from object
-            var _arr = Object.entries(key);
-
-            for (var _i = 0; _i < _arr.length; _i++) {
-              var _arr$_i = _slicedToArray(_arr[_i], 2),
-                  name = _arr$_i[0],
-                  val = _arr$_i[1];
+            for (var _i = 0, _Object$entries = Object.entries(key); _i < _Object$entries.length; _i++) {
+              var _Object$entries$_i = _slicedToArray(_Object$entries[_i], 2),
+                  name = _Object$entries$_i[0],
+                  val = _Object$entries$_i[1];
 
               elem.setAttribute(name, val);
             } // Getting attribute
@@ -3059,7 +3195,7 @@
 
   /**
   * @function module:SVGTransformList.SVGEditTransformList#clear
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
@@ -3134,6 +3270,7 @@
 
     /**
     * @param {Element} elem
+    * @returns {SVGTransformList}
     */
     function SVGTransformList(elem) {
       _classCallCheck(this, SVGTransformList);
@@ -3166,22 +3303,35 @@
         } // TODO: Add skew support in future
 
 
-        var re = /\s*((scale|matrix|rotate|translate)\s*\(.*?\))\s*,?\s*/;
+        var re = _wrapRegExp(/\s*((?:scale|matrix|rotate|translate)\s*\(.*?\))\s*,?\s*/, {
+          xform: 1
+        });
+
         var m = true;
 
         while (m) {
           m = str.match(re);
           str = str.replace(re, '');
 
-          if (m && m[1]) {
+          if (m && m.groups.xform) {
             (function () {
-              var x = m[1];
-              var bits = x.split(/\s*\(/);
-              var name = bits[0];
-              var valBits = bits[1].match(/\s*(.*?)\s*\)/);
-              valBits[1] = valBits[1].replace(/(\d)-/g, '$1 -');
-              var valArr = valBits[1].split(/[, ]+/);
-              var letters = 'abcdef'.split('');
+              var x = m.groups.xform;
+
+              var _x$split = x.split(/\s*\(/),
+                  _x$split2 = _slicedToArray(_x$split, 2),
+                  name = _x$split2[0],
+                  bits = _x$split2[1];
+
+              var valBits = bits.match(_wrapRegExp(/\s*(.*?)\s*\)/, {
+                nonWhitespace: 1
+              }));
+              valBits.groups.nonWhitespace = valBits.groups.nonWhitespace.replace(_wrapRegExp(/(\d)-/g, {
+                digit: 1
+              }), '$<digit> -');
+              var valArr = valBits.groups.nonWhitespace.split(/[, ]+/);
+
+              var letters = _toConsumableArray('abcdef');
+
               var mtx = svgroot.createSVGMatrix();
               Object.values(valArr).forEach(function (item, i) {
                 valArr[i] = parseFloat(item);
@@ -3230,7 +3380,7 @@
       this.numberOfItems = 0;
     }
     /**
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -3242,7 +3392,7 @@
       }
       /**
       * @param {SVGTransform} newItem
-      * @returns {SVGTransform}
+      * @returns {void}
       */
 
     }, {
@@ -3392,7 +3542,7 @@
   }();
   /**
   * @function module:SVGTransformList.resetListMap
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var resetListMap = function resetListMap() {
@@ -3402,7 +3552,7 @@
    * Removes transforms of the given element from the map.
    * @function module:SVGTransformList.removeElementFromListMap
    * @param {Element} elem - a DOM Element
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var removeElementFromListMap = function removeElementFromListMap(elem) {
@@ -3526,7 +3676,7 @@
    *
    * @function module:units.init
    * @param {module:units.ElementContainer} elementContainer - An object implementing the ElementContainer interface.
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var init = function init(elementContainer) {
@@ -3545,7 +3695,7 @@
     typeMap_ = {
       em: bb.width,
       ex: bb.height,
-      in: inch,
+      "in": inch,
       cm: inch / 2.54,
       mm: inch / 25.4,
       pt: inch / 72,
@@ -3618,7 +3768,7 @@
   * @param {Element} elem - DOM element to be changed
   * @param {string} attr - Name of the attribute associated with the value
   * @param {string} val - Attribute value to convert
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var setUnitAttr = function setUnitAttr(elem, attr, val) {
@@ -3785,7 +3935,7 @@
    * @function module:history.HistoryCommand#apply
    * @param {module:history.HistoryEventHandler}
    * @fires module:history~Command#event:history
-   * @returns {undefined|true}
+   * @returns {void|true}
    */
 
   /**
@@ -3794,7 +3944,7 @@
    * @function module:history.HistoryCommand#unapply
    * @param {module:history.HistoryEventHandler}
    * @fires module:history~Command#event:history
-   * @returns {undefined|true}
+   * @returns {void|true}
    */
 
   /**
@@ -3837,7 +3987,7 @@
    * @param {string} eventType One of the HistoryEvent types
    * @param {module:history~Command#event:history} command
    * @listens module:history~Command#event:history
-   * @returns {undefined}
+   * @returns {void}
    *
    */
 
@@ -3881,7 +4031,7 @@
        * Re-positions the element.
        * @param {module:history.HistoryEventHandler} handler
        * @fires module:history~Command#event:history
-       * @returns {undefined}
+       * @returns {void}
       */
 
     }, {
@@ -3902,7 +4052,7 @@
        * Positions the element back to its original location.
        * @param {module:history.HistoryEventHandler} handler
        * @fires module:history~Command#event:history
-       * @returns {undefined}
+       * @returns {void}
       */
 
     }, {
@@ -3968,7 +4118,7 @@
       * Re-inserts the new element.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -3988,7 +4138,7 @@
       * Removes the element.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4058,7 +4208,7 @@
       * Re-removes the new element.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4080,7 +4230,7 @@
       * Re-adds the new element.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4123,7 +4273,7 @@
   */
 
   /**
-  * @typedef {PlainObject.<module:history.CommandAttributeName, string>} module:history.CommandAttributes
+  * @typedef {PlainObject<module:history.CommandAttributeName, string>} module:history.CommandAttributes
   */
 
   /**
@@ -4350,7 +4500,7 @@
       * Runs "apply" on all subcommands.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4374,7 +4524,7 @@
       * Runs "unapply" on all subcommands.
       * @param {module:history.HistoryEventHandler} handler
       * @fires module:history~Command#event:history
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4419,7 +4569,7 @@
       /**
       * Adds a given command to the history stack.
       * @param {Command} cmd - The undo command object to add
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4464,7 +4614,7 @@
     }
     /**
     * Resets the undo stack, effectively clearing the undo/redo history.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -4512,7 +4662,7 @@
       }
       /**
       * Performs an undo step.
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4525,7 +4675,7 @@
       }
       /**
       * Performs a redo step.
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4539,7 +4689,7 @@
       /**
       * Adds a command object to the undo history stack.
       * @param {Command} cmd - The command object to add
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4566,7 +4716,7 @@
       * from the DOM and uses all of these to construct the undo-able command.
       * @param {string} attrName - The name of the attribute being changed
       * @param {Element[]} elems - Array of DOM elements being changed
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -4899,14 +5049,14 @@
   /**
    * @tutorial LocaleDocs
    * @typedef {module:locale.LocaleStrings|PlainObject} module:path.uiStrings
-   * @property {PlainObject.<string, string>} ui
+   * @property {PlainObject<string, string>} ui
   */
 
   var uiStrings = {};
   /**
   * @function module:path.setUiStrings
   * @param {module:path.uiStrings} strs
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var setUiStrings = function setUiStrings(strs) {
@@ -4920,7 +5070,7 @@
   /**
   * @function module:path.setLinkControlPoints
   * @param {boolean} lcp
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var setLinkControlPoints = function setLinkControlPoints(lcp) {
@@ -4943,7 +5093,7 @@
   * Object with the following keys/values
   * @typedef {PlainObject} module:path.SVGElementJSON
   * @property {string} element - Tag name of the SVG element to create
-  * @property {PlainObject.<string, string>} attr - Has key-value attributes to assign to the new element
+  * @property {PlainObject<string, string>} attr - Has key-value attributes to assign to the new element. An `id` should be set so that {@link module:utilities.EditorContext#addSVGElementFromJson} can later re-identify the element for modification or replacement.
   * @property {boolean} [curStyles=false] - Indicates whether current style attributes should be applied first
   * @property {module:path.SVGElementJSON[]} [children] - Data objects to be added recursively as children
   * @property {string} [namespace="http://www.w3.org/2000/svg"] - Indicate a (non-SVG) namespace
@@ -4959,13 +5109,13 @@
    * @function module:path.EditorContext#call
    * @param {"selected"|"changed"} ev - String with the event name
    * @param {module:svgcanvas.SvgCanvas#event:selected|module:svgcanvas.SvgCanvas#event:changed} arg - Argument to pass through to the callback function. If the event is "changed", an array of `Element`s is passed; if "selected", a single-item array of `Element` is passed.
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
    * @function module:path.EditorContext#resetD
    * @param {SVGPathElement} p
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
@@ -4978,28 +5128,28 @@
   /**
    * @function module:path.EditorContext#clearSelection
    * @param {boolean} [noCall] - When `true`, does not call the "selected" handler
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
    * @function module:path.EditorContext#addToSelection
    * @param {Element[]} elemsToAdd - An array of DOM elements to add to the selection
    * @param {boolean} showGrips - Indicates whether the resize grips should be shown
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
    * @function module:path.EditorContext#addCommandToHistory
    * @param {Command} cmd
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
    * @function module:path.EditorContext#remapElement
    * @param {Element} selected - DOM element to be changed
-   * @param {PlainObject.<string, string>} changes - Object with changes to be remapped
+   * @param {PlainObject<string, string>} changes - Object with changes to be remapped
    * @param {SVGMatrix} m - Matrix object to use for remapping coordinates
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
@@ -5031,7 +5181,7 @@
   /**
    * @function module:path.EditorContext#setStarted
    * @param {boolean} s
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
@@ -5050,7 +5200,7 @@
    * @param {PlainObject} cfg
    * @param {boolean} cfg.closedSubpath
    * @param {SVGCircleElement[]} cfg.grips
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
@@ -5058,7 +5208,7 @@
    * @param {PlainObject} cfg
    * @param {string} cfg.cmd
    * @param {Element} cfg.elem
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
@@ -5115,10 +5265,10 @@
   /**
   * @function module:path.init
   * @param {module:path.EditorContext} editorContext
-  * @returns {undefined}
+  * @returns {void}
   */
 
-  var init$1 = function init$$1(editorContext) {
+  var init$1 = function init(editorContext) {
     editorContext_ = editorContext;
     pathFuncs = [0, 'ClosePath'];
     var pathFuncsStrs = ['Moveto', 'Lineto', 'CurvetoCubic', 'CurvetoQuadratic', 'Arc', 'LinetoHorizontal', 'LinetoVertical', 'CurvetoCubicSmooth', 'CurvetoQuadraticSmooth'];
@@ -5132,7 +5282,7 @@
   * @param {Element} elem
   * @param {Segment} newseg
   * @param {Integer} index
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var insertItemBefore = function insertItemBefore(elem, newseg, index) {
@@ -5379,7 +5529,7 @@
   /**
   * @function module:path.getControlPoints
   * @param {Segment} seg
-  * @returns {PlainObject.<string, SVGLineElement|SVGCircleElement>}
+  * @returns {PlainObject<string, SVGLineElement|SVGCircleElement>}
   */
 
   var getControlPoints = function getControlPoints(seg) {
@@ -5436,7 +5586,7 @@
   * @param {Integer} index
   * @param {ArgumentsArray} pts
   * @param {SVGPathElement} elem
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var replacePathSeg = function replacePathSeg(type, index, pts, elem) {
@@ -5606,7 +5756,7 @@
     }
     /**
      * @param {boolean} y
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -5621,7 +5771,7 @@
       }
       /**
        * @param {boolean} y
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5631,7 +5781,7 @@
       }
       /**
        * @param {boolean} y
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5646,7 +5796,7 @@
       }
       /**
        * @param {boolean} y
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5664,7 +5814,7 @@
         }
       }
       /**
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5677,7 +5827,7 @@
       }
       /**
        * @param {boolean} full
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5705,7 +5855,7 @@
       /**
        * @param {Integer} dx
        * @param {Integer} dy
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5713,7 +5863,8 @@
       value: function move(dx, dy) {
         var item = this.item;
         var curPts = this.ctrlpts ? [item.x += dx, item.y += dy, item.x1, item.y1, item.x2 += dx, item.y2 += dy] : [item.x += dx, item.y += dy];
-        replacePathSeg(this.type, this.index, curPts);
+        replacePathSeg(this.type, this.index, // type 10 means ARC
+        this.type === 10 ? ptObjToArr(this.type, item) : curPts);
 
         if (this.next && this.next.ctrlpts) {
           var next = this.next.item;
@@ -5737,7 +5888,7 @@
       }
       /**
        * @param {Integer} num
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5777,7 +5928,7 @@
        * @param {Integer} num
        * @param {Integer} dx
        * @param {Integer} dy
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5793,7 +5944,7 @@
       /**
        * @param {Integer} newType Possible values set during {@link module:path.init}
        * @param {ArgumentsArray} pts
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -5843,7 +5994,7 @@
 
     _createClass(Path, [{
       key: "init",
-      value: function init$$1() {
+      value: function init() {
         // Hide all grips, etc
         // fixed, needed to work on all found elements, not just first
         $$1(getGripContainer()).find('*').each(function () {
@@ -5928,12 +6079,12 @@
       * @callback module:path.PathEachSegCallback
       * @this module:path.Segment
       * @param {Integer} i The index of the seg being iterated
-      * @returns {boolean|undefined} Will stop execution of `eachSeg` if returns `false`
+      * @returns {boolean|void} Will stop execution of `eachSeg` if returns `false`
       */
 
       /**
       * @param {module:path.PathEachSegCallback} fn
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -5951,7 +6102,7 @@
       }
       /**
       * @param {Integer} index
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6003,7 +6154,7 @@
       }
       /**
       * @param {Integer} index
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6033,7 +6184,7 @@
       }
       /**
       * @param {Integer} index
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6049,7 +6200,7 @@
         this.selected_pts.splice(pos, 1);
       }
       /**
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6062,7 +6213,7 @@
         this.selected_pts = [];
       }
       /**
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6072,7 +6223,7 @@
       }
       /**
       * @param {Integer} y
-      * @returns {undefined}
+      * @returns {Path}
       */
 
     }, {
@@ -6094,7 +6245,7 @@
       * Move selected points.
       * @param {Integer} dx
       * @param {Integer} dy
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6110,7 +6261,7 @@
       /**
       * @param {Integer} dx
       * @param {Integer} dy
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6125,7 +6276,7 @@
       }
       /**
       * @param {?Integer} newType See {@link https://www.w3.org/TR/SVG/single-page.html#paths-InterfaceSVGPathSeg}
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6205,7 +6356,7 @@
       /**
       * @param {Integer} pt
       * @param {Integer} ctrlNum
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6258,7 +6409,7 @@
       }
       /**
       * @param {string} text
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -6278,27 +6429,27 @@
       }
       /**
       * @param {Integer|Integer[]} indexes
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
       key: "addPtsToSelection",
       value: function addPtsToSelection(indexes) {
+        var _this = this;
+
         if (!Array.isArray(indexes)) {
           indexes = [indexes];
         }
 
-        for (var _i4 = 0; _i4 < indexes.length; _i4++) {
-          var index = indexes[_i4];
-          var seg = this.segs[index];
+        indexes.forEach(function (index) {
+          var seg = _this.segs[index];
 
           if (seg.ptgrip) {
-            if (!this.selected_pts.includes(index) && index >= 0) {
-              this.selected_pts.push(index);
+            if (!_this.selected_pts.includes(index) && index >= 0) {
+              _this.selected_pts.push(index);
             }
           }
-        }
-
+        });
         this.selected_pts.sort();
         var i = this.selected_pts.length;
         var grips = [];
@@ -6306,11 +6457,9 @@
 
         while (i--) {
           var pt = this.selected_pts[i];
-          var _seg2 = this.segs[pt];
-
-          _seg2.select(true);
-
-          grips[i] = _seg2.ptgrip;
+          var seg = this.segs[pt];
+          seg.select(true);
+          grips[i] = seg.ptgrip;
         }
 
         var closedSubpath = Path.subpathIsClosed(this.selected_pts[0]);
@@ -6318,45 +6467,47 @@
           grips: grips,
           closedSubpath: closedSubpath
         });
+      } // STATIC
+
+      /**
+      * @param {Integer} index
+      * @returns {boolean}
+      */
+
+    }], [{
+      key: "subpathIsClosed",
+      value: function subpathIsClosed(index) {
+        var clsd = false; // Check if subpath is already open
+
+        path.eachSeg(function (i) {
+          if (i <= index) {
+            return true;
+          }
+
+          if (this.type === 2) {
+            // Found M first, so open
+            return false;
+          }
+
+          if (this.type === 1) {
+            // Found Z first, so closed
+            clsd = true;
+            return false;
+          }
+
+          return true;
+        });
+        return clsd;
       }
     }]);
 
     return Path;
   }();
   /**
-  * @param {Integer} index
-  * @returns {boolean}
-  */
-
-  Path.subpathIsClosed = function (index) {
-    var clsd = false; // Check if subpath is already open
-
-    path.eachSeg(function (i) {
-      if (i <= index) {
-        return true;
-      }
-
-      if (this.type === 2) {
-        // Found M first, so open
-        return false;
-      }
-
-      if (this.type === 1) {
-        // Found Z first, so closed
-        clsd = true;
-        return false;
-      }
-
-      return true;
-    });
-    return clsd;
-  };
-  /**
   * @function module:path.getPath_
   * @param {SVGPathElement} elem
   * @returns {module:path.Path}
   */
-
 
   var getPath_ = function getPath_(elem) {
     var p = pathData[elem.id];
@@ -6370,7 +6521,7 @@
   /**
   * @function module:path.removePath_
   * @param {string} id
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var removePath_ = function removePath_(id) {
@@ -6408,7 +6559,7 @@
   * @function module:path.recalcRotatedPath
   * @todo This is still using ye olde transform methods, can probably
   * be optimized or even taken care of by `recalculateDimensions`
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
@@ -6475,7 +6626,7 @@
 
   /**
   * @function module:path.clearData
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var clearData = function clearData() {
@@ -6486,7 +6637,7 @@
   * @function module:path.reorientGrads
   * @param {Element} elem
   * @param {SVGMatrix} m
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var reorientGrads = function reorientGrads(elem, m) {
@@ -6513,11 +6664,12 @@
           var pt1 = transformPoint(x1, y1, m);
           var pt2 = transformPoint(x2, y2, m); // Convert back to BB points
 
-          var gCoords = {};
-          gCoords.x1 = (pt1.x - bb.x) / bb.width;
-          gCoords.y1 = (pt1.y - bb.y) / bb.height;
-          gCoords.x2 = (pt2.x - bb.x) / bb.width;
-          gCoords.y2 = (pt2.y - bb.y) / bb.height;
+          var gCoords = {
+            x1: (pt1.x - bb.x) / bb.width,
+            y1: (pt1.y - bb.y) / bb.height,
+            x2: (pt2.x - bb.x) / bb.width,
+            y2: (pt2.y - bb.y) / bb.height
+          };
           var newgrad = grad.cloneNode(true);
           $$1(newgrad).attr(gCoords);
           newgrad.id = editorContext_.getNextId();
@@ -6701,6 +6853,7 @@
 
           d += pathDSegment(letter, [[x1, y1], [x, y]]);
           break;
+        // eslint-disable-next-line sonarjs/no-duplicated-branches
 
         case 10:
           // absolute elliptical arc (A)
@@ -6885,7 +7038,7 @@
         * @param {Element} mouseTarget
         * @param {Float} startX
         * @param {Float} startY
-        * @returns {boolean|undefined}
+        * @returns {boolean|void}
         */
         mouseDown: function mouseDown(evt, mouseTarget, startX, startY) {
           var id;
@@ -7123,7 +7276,7 @@
               width: 0,
               height: 0,
               display: 'inline'
-            }, 100);
+            });
           }
 
           return undefined;
@@ -7132,7 +7285,7 @@
         /**
         * @param {Float} mouseX
         * @param {Float} mouseY
-        * @returns {undefined}
+        * @returns {void}
         */
         mouseMove: function mouseMove(mouseX, mouseY) {
           var currentZoom = editorContext_.getCurrentZoom();
@@ -7275,7 +7428,7 @@
         * @param {Element} element
         * @param {Float} mouseX
         * @param {Float} mouseY
-        * @returns {module:path.keepElement|undefined}
+        * @returns {module:path.keepElement|void}
         */
         mouseUp: function mouseUp(evt, element, mouseX, mouseY) {
           var drawnPath = editorContext_.getDrawnPath(); // Create mode
@@ -7329,7 +7482,7 @@
 
         /**
         * @param {Element} element
-        * @returns {undefined}
+        * @returns {void}
         */
         toEditMode: function toEditMode(element) {
           path = getPath_(element);
@@ -7343,7 +7496,7 @@
         /**
         * @param {Element} elem
         * @fires module:svgcanvas.SvgCanvas#event:selected
-        * @returns {undefined}
+        * @returns {void}
         */
         toSelectMode: function toSelectMode(elem) {
           var selPath = elem === path.elem;
@@ -7365,7 +7518,7 @@
 
         /**
         * @param {boolean} on
-        * @returns {undefined}
+        * @returns {void}
         */
         addSubPath: function addSubPath(on) {
           if (on) {
@@ -7381,7 +7534,7 @@
 
         /**
         * @param {Element} target
-        * @returns {undefined}
+        * @returns {void}
         */
         select: function select(target) {
           if (currentPath === target) {
@@ -7394,7 +7547,7 @@
 
         /**
         * @fires module:svgcanvas.SvgCanvas#event:changed
-        * @returns {undefined}
+        * @returns {void}
         */
         reorient: function reorient() {
           var elem = editorContext_.getSelectedElements()[0];
@@ -7427,7 +7580,7 @@
 
         /**
         * @param {boolean} remove Not in use
-        * @returns {undefined}
+        * @returns {void}
         */
         clear: function clear(remove) {
           var drawnPath = editorContext_.getDrawnPath();
@@ -7452,7 +7605,7 @@
 
         /**
         * @param {?(Element|SVGPathElement)} pth
-        * @returns {false|undefined}
+        * @returns {false|void}
         */
         resetOrientation: function resetOrientation(pth) {
           if (isNullish(pth) || pth.nodeName !== 'path') {
@@ -7508,7 +7661,7 @@
         },
 
         /**
-        * @returns {undefined}
+        * @returns {void}
         */
         zoomChange: function zoomChange() {
           if (editorContext_.getCurrentMode() === 'pathedit') {
@@ -7538,14 +7691,14 @@
 
         /**
         * @param {boolean} linkPoints
-        * @returns {undefined}
+        * @returns {void}
         */
         linkControlPoints: function linkControlPoints(linkPoints) {
           setLinkControlPoints(linkPoints);
         },
 
         /**
-        * @returns {undefined}
+        * @returns {void}
         */
         clonePathNode: function clonePathNode() {
           path.storeD();
@@ -7566,7 +7719,7 @@
         },
 
         /**
-        * @returns {undefined}
+        * @returns {void}
         */
         opencloseSubPath: function opencloseSubPath() {
           var selPts = path.selected_pts; // Only allow one selected node for now
@@ -7678,7 +7831,7 @@
         },
 
         /**
-        * @returns {undefined}
+        * @returns {void}
         */
         deletePathNode: function deletePathNode() {
           if (!pathActions.canDeleteNodes) {
@@ -7776,7 +7929,7 @@
 
         /**
         * @param {?Integer} v See {@link https://www.w3.org/TR/SVG/single-page.html#paths-InterfaceSVGPathSeg}
-        * @returns {undefined}
+        * @returns {void}
         */
         setSegType: function setSegType(v) {
           path.setSegType(v);
@@ -7785,7 +7938,7 @@
         /**
         * @param {string} attr
         * @param {Float} newValue
-        * @returns {undefined}
+        * @returns {void}
         */
         moveNode: function moveNode(attr, newValue) {
           var selPts = path.selected_pts;
@@ -7808,7 +7961,7 @@
 
         /**
         * @param {Element} elem
-        * @returns {undefined}
+        * @returns {void}
         */
         fixEnd: function fixEnd(elem) {
           // Adds an extra segment if the last seg before a Z doesn't end
@@ -7870,7 +8023,7 @@
   * Object with the following keys/values
   * @typedef {PlainObject} module:utilities.SVGElementJSON
   * @property {string} element - Tag name of the SVG element to create
-  * @property {PlainObject.<string, string>} attr - Has key-value attributes to assign to the new element
+  * @property {PlainObject<string, string>} attr - Has key-value attributes to assign to the new element. An `id` should be set so that {@link module:utilities.EditorContext#addSVGElementFromJson} can later re-identify the element for modification or replacement.
   * @property {boolean} [curStyles=false] - Indicates whether current style attributes should be applied first
   * @property {module:utilities.SVGElementJSON[]} [children] - Data objects to be added recursively as children
   * @property {string} [namespace="http://www.w3.org/2000/svg"] - Indicate a (non-SVG) namespace
@@ -7930,10 +8083,10 @@
   /**
   * @function module:utilities.init
   * @param {module:utilities.EditorContext} editorContext
-  * @returns {undefined}
+  * @returns {void}
   */
 
-  var init$2 = function init$$1(editorContext) {
+  var init$2 = function init(editorContext) {
     editorContext_$1 = editorContext;
     domdoc_ = editorContext.getDOMDocument();
     domcontainer_ = editorContext.getDOMContainer();
@@ -7948,7 +8101,10 @@
    */
 
   var dropXMLInteralSubset = function dropXMLInteralSubset(str) {
-    return str.replace(/(<!DOCTYPE\s+\w*\s*\[).*(\?\]>)/, '$1$2');
+    return str.replace(_wrapRegExp(/(<!DOCTYPE\s+\w*\s*\[).*(\?\]>)/, {
+      doctypeOpen: 1,
+      doctypeClose: 2
+    }), '$<doctypeOpen>$<doctypeClose>');
   };
   /**
   * Converts characters in a string to XML-friendly entities.
@@ -8088,9 +8244,16 @@
       return '';
     }
 
-    var arr = dataurl.split(','),
-        mime = arr[0].match(/:(.*?);/)[1],
-        bstr = atob(arr[1]);
+    var _dataurl$split = dataurl.split(','),
+        _dataurl$split2 = _slicedToArray(_dataurl$split, 2),
+        prefix = _dataurl$split2[0],
+        suffix = _dataurl$split2[1],
+        _prefix$match = prefix.match(_wrapRegExp(/:(.*?);/, {
+      mime: 1
+    })),
+        mime = _prefix$match.groups.mime,
+        bstr = atob(suffix);
+
     var n = bstr.length;
     var u8arr = new Uint8Array(n);
 
@@ -8142,6 +8305,7 @@
 
   var text2xml = function text2xml(sXML) {
     if (sXML.includes('<svg:svg')) {
+      // eslint-disable-next-line prefer-named-capture-group
       sXML = sXML.replace(/<(\/?)svg:/g, '<$1').replace('xmlns:svg', 'xmlns');
     }
 
@@ -8196,7 +8360,7 @@
   /**
   * @callback module:utilities.TreeWalker
   * @param {Element} elem - DOM element being traversed
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
@@ -8204,7 +8368,7 @@
   * @function module:utilities.walkTree
   * @param {Element} elem - DOM element to traverse
   * @param {module:utilities.TreeWalker} cbFn - Callback function to run on each element
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var walkTree = function walkTree(elem, cbFn) {
@@ -8223,7 +8387,7 @@
   * @todo FIXME: Shouldn't this be calling walkTreePost?
   * @param {Element} elem - DOM element to traverse
   * @param {module:utilities.TreeWalker} cbFn - Callback function to run on each element
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var walkTreePost = function walkTreePost(elem, cbFn) {
@@ -8282,7 +8446,7 @@
   * @function module:utilities.setHref
   * @param {Element} elem
   * @param {string} val
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var setHref = function setHref(elem, val) {
@@ -8322,8 +8486,8 @@
   * @returns {module:utilities.BBoxObject} A BBox-like object
   */
 
-  var getPathBBox = function getPathBBox(path$$1) {
-    var seglist = path$$1.pathSegList;
+  var getPathBBox = function getPathBBox(path) {
+    var seglist = path.pathSegList;
     var tot = seglist.numberOfItems;
     var bounds = [[], []];
     var start = seglist.getItem(0);
@@ -8523,11 +8687,17 @@
 
 
           if (!isWebkit()) {
-            var bb = {};
-            bb.width = ret.width;
-            bb.height = ret.height;
-            bb.x = ret.x + parseFloat(selected.getAttribute('x') || 0);
-            bb.y = ret.y + parseFloat(selected.getAttribute('y') || 0);
+            var _ret = ret,
+                x = _ret.x,
+                y = _ret.y,
+                width = _ret.width,
+                height = _ret.height;
+            var bb = {
+              width: width,
+              height: height,
+              x: x + parseFloat(selected.getAttribute('x') || 0),
+              y: y + parseFloat(selected.getAttribute('y') || 0)
+            };
             ret = bb;
           }
         } else if (visElemsArr.includes(elname)) {
@@ -8539,12 +8709,13 @@
               // Re: Chrome returning bbox for containing text element, see: https://bugs.chromium.org/p/chromium/issues/detail?id=349835
               var extent = selected.getExtentOfChar(0); // pos+dimensions of the first glyph
 
-              var width = selected.getComputedTextLength(); // width of the tspan
+              var _width = selected.getComputedTextLength(); // width of the tspan
+
 
               ret = {
                 x: extent.x,
                 y: extent.y,
-                width: width,
+                width: _width,
                 height: extent.height
               };
             }
@@ -8681,7 +8852,7 @@
   * Get a set of attributes from an element that is useful for convertToPath.
   * @function module:utilities.getExtraAttributesForConvertToPath
   * @param {Element} elem - The element to be probed
-  * @returns {PlainObject.<"marker-start"|"marker-end"|"marker-mid"|"filter"|"clip-path", string>} An object with attributes.
+  * @returns {PlainObject<"marker-start"|"marker-end"|"marker-mid"|"filter"|"clip-path", string>} An object with attributes.
   */
 
   var getExtraAttributesForConvertToPath = function getExtraAttributesForConvertToPath(elem) {
@@ -8706,43 +8877,43 @@
   * @returns {DOMRect|false} The resulting path's bounding box object.
   */
 
-  var getBBoxOfElementAsPath = function getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions$$1) {
-    var path$$1 = addSVGElementFromJson({
+  var getBBoxOfElementAsPath = function getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions) {
+    var path = addSVGElementFromJson({
       element: 'path',
       attr: getExtraAttributesForConvertToPath(elem)
     });
     var eltrans = elem.getAttribute('transform');
 
     if (eltrans) {
-      path$$1.setAttribute('transform', eltrans);
+      path.setAttribute('transform', eltrans);
     }
 
     var parentNode = elem.parentNode;
 
     if (elem.nextSibling) {
-      elem.before(path$$1);
+      elem.before(path);
     } else {
-      parentNode.append(path$$1);
+      parentNode.append(path);
     }
 
     var d = getPathDFromElement(elem);
 
     if (d) {
-      path$$1.setAttribute('d', d);
+      path.setAttribute('d', d);
     } else {
-      path$$1.remove();
+      path.remove();
     } // Get the correct BBox of the new path, then discard it
 
 
-    pathActions$$1.resetOrientation(path$$1);
+    pathActions.resetOrientation(path);
     var bb = false;
 
     try {
-      bb = path$$1.getBBox();
+      bb = path.getBBox();
     } catch (e) {// Firefox fails
     }
 
-    path$$1.remove();
+    path.remove();
     return bb;
   };
   /**
@@ -8759,57 +8930,57 @@
   * @returns {SVGPathElement|null} The converted path element or null if the DOM element was not recognized.
   */
 
-  var convertToPath = function convertToPath(elem, attrs, addSVGElementFromJson, pathActions$$1, clearSelection, addToSelection, hstry, addCommandToHistory) {
+  var convertToPath = function convertToPath(elem, attrs, addSVGElementFromJson, pathActions, clearSelection, addToSelection, hstry, addCommandToHistory) {
     var batchCmd = new hstry.BatchCommand('Convert element to Path'); // Any attribute on the element not covered by the passed-in attributes
 
     attrs = $$2.extend({}, attrs, getExtraAttributesForConvertToPath(elem));
-    var path$$1 = addSVGElementFromJson({
+    var path = addSVGElementFromJson({
       element: 'path',
       attr: attrs
     });
     var eltrans = elem.getAttribute('transform');
 
     if (eltrans) {
-      path$$1.setAttribute('transform', eltrans);
+      path.setAttribute('transform', eltrans);
     }
 
     var id = elem.id;
     var parentNode = elem.parentNode;
 
     if (elem.nextSibling) {
-      elem.before(path$$1);
+      elem.before(path);
     } else {
-      parentNode.append(path$$1);
+      parentNode.append(path);
     }
 
     var d = getPathDFromElement(elem);
 
     if (d) {
-      path$$1.setAttribute('d', d); // Replace the current element with the converted one
+      path.setAttribute('d', d); // Replace the current element with the converted one
       // Reorient if it has a matrix
 
       if (eltrans) {
-        var tlist = getTransformList(path$$1);
+        var tlist = getTransformList(path);
 
         if (hasMatrixTransform(tlist)) {
-          pathActions$$1.resetOrientation(path$$1);
+          pathActions.resetOrientation(path);
         }
       }
 
       var nextSibling = elem.nextSibling;
       batchCmd.addSubCommand(new hstry.RemoveElementCommand(elem, nextSibling, parent));
-      batchCmd.addSubCommand(new hstry.InsertElementCommand(path$$1));
+      batchCmd.addSubCommand(new hstry.InsertElementCommand(path));
       clearSelection();
       elem.remove();
-      path$$1.setAttribute('id', id);
-      path$$1.removeAttribute('visibility');
-      addToSelection([path$$1], true);
+      path.setAttribute('id', id);
+      path.removeAttribute('visibility');
+      addToSelection([path], true);
       addCommandToHistory(batchCmd);
-      return path$$1;
+      return path;
     } // the elem.tagName was not recognized, so no "d" attribute. Remove it, so we've haven't changed anything.
 
 
-    path$$1.remove();
+    path.remove();
     return null;
   };
   /**
@@ -8849,7 +9020,7 @@
   */
 
 
-  var getBBoxWithTransform = function getBBoxWithTransform(elem, addSVGElementFromJson, pathActions$$1) {
+  var getBBoxWithTransform = function getBBoxWithTransform(elem, addSVGElementFromJson, pathActions) {
     // TODO: Fix issue with rotated groups. Currently they work
     // fine in FF, but not in other browsers (same problem mentioned
     // in Issue 339 comment #2).
@@ -8872,7 +9043,7 @@
         var elemNames = ['ellipse', 'path', 'line', 'polyline', 'polygon'];
 
         if (elemNames.includes(elem.tagName)) {
-          goodBb = getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions$$1);
+          goodBb = getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions);
           bb = goodBb;
         } else if (elem.tagName === 'rect') {
           // Look for radius
@@ -8880,7 +9051,7 @@
           var ry = elem.getAttribute('ry');
 
           if (rx || ry) {
-            goodBb = getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions$$1);
+            goodBb = getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions);
             bb = goodBb;
           }
         }
@@ -8937,7 +9108,7 @@
   */
 
 
-  var getStrokedBBox = function getStrokedBBox(elems, addSVGElementFromJson, pathActions$$1) {
+  var getStrokedBBox = function getStrokedBBox(elems, addSVGElementFromJson, pathActions) {
     if (!elems || !elems.length) {
       return false;
     }
@@ -8952,7 +9123,7 @@
         return;
       }
 
-      fullBb = getBBoxWithTransform(this, addSVGElementFromJson, pathActions$$1);
+      fullBb = getBBoxWithTransform(this, addSVGElementFromJson, pathActions);
     }); // This shouldn't ever happen...
 
     if (fullBb === undefined) {
@@ -8974,7 +9145,7 @@
       maxY += offset;
     } else {
       $$2.each(elems, function (i, elem) {
-        var curBb = getBBoxWithTransform(elem, addSVGElementFromJson, pathActions$$1);
+        var curBb = getBBoxWithTransform(elem, addSVGElementFromJson, pathActions);
 
         if (curBb) {
           var _offset = getStrokeOffsetForBBox(elem);
@@ -9106,19 +9277,17 @@
   * Assigns multiple attributes to an element.
   * @function module:utilities.assignAttributes
   * @param {Element} elem - DOM element to apply new attribute values to
-  * @param {PlainObject.<string, string>} attrs - Object with attribute keys/values
+  * @param {PlainObject<string, string>} attrs - Object with attribute keys/values
   * @param {Integer} [suspendLength] - Milliseconds to suspend redraw
   * @param {boolean} [unitCheck=false] - Boolean to indicate the need to use units.setUnitAttr
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var assignAttributes = function assignAttributes(elem, attrs, suspendLength, unitCheck) {
-    var _arr = Object.entries(attrs);
-
-    for (var _i = 0; _i < _arr.length; _i++) {
-      var _arr$_i = _slicedToArray(_arr[_i], 2),
-          key = _arr$_i[0],
-          value = _arr$_i[1];
+    for (var _i = 0, _Object$entries = Object.entries(attrs); _i < _Object$entries.length; _i++) {
+      var _Object$entries$_i = _slicedToArray(_Object$entries[_i], 2),
+          key = _Object$entries$_i[0],
+          value = _Object$entries$_i[1];
 
       var ns = key.substr(0, 4) === 'xml:' ? NS.XML : key.substr(0, 6) === 'xlink:' ? NS.XLINK : null;
 
@@ -9135,7 +9304,7 @@
   * Remove unneeded (default) attributes, making resulting SVG smaller.
   * @function module:utilities.cleanupElement
   * @param {Element} element - DOM element to clean up
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var cleanupElement = function cleanupElement(element) {
@@ -9202,7 +9371,7 @@
    * Prevents default browser click behaviour on the given element.
    * @function module:utilities.preventClickDefault
    * @param {Element} img - The DOM element to prevent the click on
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var preventClickDefault = function preventClickDefault(img) {
@@ -9272,7 +9441,7 @@
   };
   /**
    * Whether a value is `null` or `undefined`.
-   * @param {Any} val
+   * @param {any} val
    * @returns {boolean}
    */
 
@@ -9312,7 +9481,7 @@
   };
   /**
   * @param {module:contextmenu.MenuItem} menuItem
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var injectExtendedContextMenuItemIntoDom = function injectExtendedContextMenuItemIntoDom(menuItem) {
@@ -9327,7 +9496,7 @@
   };
   /**
   * @function module:contextmenu.injectExtendedContextMenuItemsIntoDom
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
@@ -9358,8 +9527,8 @@
   /**
    * Add any of the whitelisted attributes to the script tag.
    * @param {HTMLScriptElement} script
-   * @param {PlainObject.<string, string>} atts
-   * @returns {undefined}
+   * @param {PlainObject<string, string>} atts
+   * @returns {void}
    */
 
 
@@ -9379,9 +9548,9 @@
 
   /**
   * @function module:importModule.importSetGlobalDefault
-  * @param {string|string[]} url
+  * @param {string|GenericArray<any>} url
   * @param {module:importModule.ImportConfig} config
-  * @returns {Promise} The value to which it resolves depends on the export of the targeted module.
+  * @returns {Promise<any>} The value to which it resolves depends on the export of the targeted module.
   */
 
 
@@ -9394,7 +9563,7 @@
   * @function module:importModule.importSetGlobal
   * @param {string|string[]} url
   * @param {module:importModule.ImportConfig} config
-  * @returns {Promise} The promise resolves to either an `ArbitraryModule` or
+  * @returns {Promise<ArbitraryModule>} The promise resolves to either an `ArbitraryModule` or
   *   any other value depends on the export of the targeted module.
   */
 
@@ -9406,7 +9575,7 @@
    * @author Brett Zamir (other items are from `dynamic-import-polyfill`)
    * @param {string|string[]} url
    * @param {PlainObject} [atts={}]
-   * @returns {Promise} Resolves to `undefined` or rejects with an `Error` upon a
+   * @returns {Promise<void|Error>} Resolves to `undefined` or rejects with an `Error` upon a
    *   script loading error
    */
 
@@ -9444,7 +9613,7 @@
               return _context.stop();
           }
         }
-      }, _callee, this);
+      }, _callee);
     }));
     return _importSetGlobal.apply(this, arguments);
   }
@@ -9463,7 +9632,7 @@
       var script = document.createElement('script');
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function scriptOnError() {
@@ -9472,7 +9641,7 @@
       }
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -9497,14 +9666,14 @@
     });
   }
   /**
-   *
-   * @param {string|string[]} url
-   * @param {PlainObject} [atts={}]
-   * @param {PlainObject} opts
-   * @param {boolean} [opts.returnDefault=false} = {}]
-   * @returns {Promise} Resolves to value of loading module or rejects with
-   *   `Error` upon a script loading error.
-   */
+  *
+  * @param {string|string[]} url
+  * @param {PlainObject} [atts={}]
+  * @param {PlainObject} opts
+  * @param {boolean} [opts.returnDefault=false} = {}]
+  * @returns {Promise<any>} Resolves to value of loading module or rejects with
+  *   `Error` upon a script loading error.
+  */
 
   function importModule(url) {
     var atts = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
@@ -9525,7 +9694,7 @@
       var script = document.createElement('script');
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function scriptOnError() {
@@ -9534,7 +9703,7 @@
       }
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -9597,12 +9766,18 @@
         btnHolder = $('#dialog_buttons'),
         dialogContent = $('#dialog_content');
     /**
+    * @typedef {PlainObject} module:jQueryPluginDBox.PromiseResultObject
+    * @property {string|true} response
+    * @property {boolean} checked
+    */
+
+    /**
     * Resolves to `false` (if cancelled), for prompts and selects
     * without checkboxes, it resolves to the value of the form control. For other
     * types without checkboxes, it resolves to `true`. For checkboxes, it resolves
     * to an object with the `response` key containing the same value as the previous
     * mentioned (string or `true`) and a `checked` (boolean) property.
-    * @typedef {Promise} module:jQueryPluginDBox.PromiseResult
+    * @typedef {Promise<boolean|string|module:jQueryPluginDBox.PromiseResultObject>} module:jQueryPluginDBox.ResultPromise
     */
 
     /**
@@ -9622,23 +9797,27 @@
     /**
      * Triggered upon a change of value for the select pull-down.
      * @callback module:jQueryPluginDBox.SelectChangeListener
-     * @returns {undefined}
+     * @returns {void}
      */
 
     /**
-    * @param {"alert"|"prompt"|"select"|"process"} type
-    * @param {string} msg
-    * @param {string} [defaultVal]
-    * @param {module:jQueryPluginDBox.SelectOption[]} [opts]
-    * @param {module:jQueryPluginDBox.SelectChangeListener} [changeListener]
-    * @param {module:jQueryPluginDBox.CheckboxInfo} [checkbox]
-    * @returns {jQueryPluginDBox.PromiseResult}
+     * Creates a dialog of the specified type with a given message
+     *  and any defaults and type-specific metadata. Returns a `Promise`
+     *  which resolves differently depending on whether the dialog
+     *  was cancelled or okayed (with the response and any checked state).
+     * @param {"alert"|"prompt"|"select"|"process"} type
+     * @param {string} msg
+     * @param {string} [defaultVal]
+     * @param {module:jQueryPluginDBox.SelectOption[]} [opts]
+     * @param {module:jQueryPluginDBox.SelectChangeListener} [changeListener]
+     * @param {module:jQueryPluginDBox.CheckboxInfo} [checkbox]
+     * @returns {jQueryPluginDBox.ResultPromise}
     */
 
     function dbox(type, msg, defaultVal, opts, changeListener, checkbox) {
       dialogContent.html('<p>' + msg.replace(/\n/g, '</p><p>') + '</p>').toggleClass('prompt', type === 'prompt');
       btnHolder.empty();
-      var ok = $('<input type="button" value="' + strings.ok + '">').appendTo(btnHolder);
+      var ok = $('<input type="button" data-ok="" value="' + strings.ok + '">').appendTo(btnHolder);
       return new Promise(function (resolve, reject) {
         // eslint-disable-line promise/avoid-new
         if (type !== 'alert') {
@@ -9658,7 +9837,7 @@
           });
         } else if (type === 'select') {
           var div = $('<div style="text-align:center;">');
-          ctrl = $('<select>').appendTo(div);
+          ctrl = $("<select aria-label=\"".concat(msg, "\">")).appendTo(div);
 
           if (checkbox) {
             var label = $('<label>').text(checkbox.label);
@@ -9720,7 +9899,7 @@
     }
     /**
     * @param {string} msg Message to alert
-    * @returns {jQueryPluginDBox.PromiseResult}
+    * @returns {jQueryPluginDBox.ResultPromise}
     */
 
 
@@ -9729,7 +9908,7 @@
     };
     /**
     * @param {string} msg Message for which to ask confirmation
-    * @returns {jQueryPluginDBox.PromiseResult}
+    * @returns {jQueryPluginDBox.ResultPromise}
     */
 
 
@@ -9738,7 +9917,7 @@
     };
     /**
     * @param {string} msg Message to indicate upon cancelable indicator
-    * @returns {jQueryPluginDBox.PromiseResult}
+    * @returns {jQueryPluginDBox.ResultPromise}
     */
 
 
@@ -9748,7 +9927,7 @@
     /**
     * @param {string} msg Message to accompany the prompt
     * @param {string} [defaultText=''] The default text to show for the prompt
-    * @returns {jQueryPluginDBox.PromiseResult}
+    * @returns {jQueryPluginDBox.ResultPromise}
     */
 
 
@@ -9770,9 +9949,9 @@
    * an existing group element or, with three parameters, will create a new layer group element.
    *
    * @example
-   * new Layer('name', group);          // Use the existing group for this layer.
-   * new Layer('name', group, svgElem); // Create a new group and add it to the DOM after group.
-   * new Layer('name', null, svgElem);  // Create a new group and add it to the DOM as the last layer.
+   * const l1 = new Layer('name', group);          // Use the existing group for this layer.
+   * const l2 = new Layer('name', group, svgElem); // Create a new group and add it to the DOM after group.
+   * const l3 = new Layer('name', null, svgElem);  // Create a new group and add it to the DOM as the last layer.
    * @memberof module:layer
    */
 
@@ -9785,7 +9964,7 @@
     *     If group and no svgElem, use group for this layer.
     *     If group and svgElem, create a new group element and insert it in the DOM after group.
     *     If no group and svgElem, create a new group element and insert it in the DOM as the last layer.
-    * @param {SVGGElement=} svgElem - The SVG DOM element. If defined, use this to add
+    * @param {SVGGElement} [svgElem] - The SVG DOM element. If defined, use this to add
     *     a new layer to the document.
     */
     function Layer(name, group, svgElem) {
@@ -9838,7 +10017,7 @@
       }
       /**
        * Active this layer so it takes pointer events.
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -9848,7 +10027,7 @@
       }
       /**
        * Deactive this layer so it does NOT take pointer events.
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -9859,7 +10038,7 @@
       /**
        * Set this layer visible or hidden based on 'visible' parameter.
        * @param {boolean} visible - If true, make visible; otherwise, hide it.
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -9902,7 +10081,7 @@
        * Sets the opacity of this layer. If opacity is not a value between 0.0 and 1.0,
        * nothing happens.
        * @param {Float} opacity - A float value in the range 0.0-1.0
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -9915,14 +10094,34 @@
       /**
        * Append children to this layer.
        * @param {SVGGElement} children - The children to append to this layer.
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
       key: "appendChildren",
       value: function appendChildren(children) {
-        for (var i = 0; i < children.length; ++i) {
-          this.group_.append(children[i]);
+        var _iteratorNormalCompletion = true;
+        var _didIteratorError = false;
+        var _iteratorError = undefined;
+
+        try {
+          for (var _iterator = children[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+            var child = _step.value;
+            this.group_.append(child);
+          }
+        } catch (err) {
+          _didIteratorError = true;
+          _iteratorError = err;
+        } finally {
+          try {
+            if (!_iteratorNormalCompletion && _iterator["return"] != null) {
+              _iterator["return"]();
+            }
+          } finally {
+            if (_didIteratorError) {
+              throw _iteratorError;
+            }
+          }
         }
       }
       /**
@@ -10007,7 +10206,7 @@
    * Add class `Layer.CLASS_NAME` to the element (usually `class='layer'`).
    *
    * @param {SVGGElement} elem - The SVG element to update
-   * @returns {undefined}
+   * @returns {void}
    */
 
   function addLayerClass(elem) {
@@ -10187,7 +10386,7 @@
        * Private function to add a command to the history or current batch command.
        * @private
        * @param {Command} cmd
-       * @returns {module:history.HistoryRecordingService|undefined}
+       * @returns {module:history.HistoryRecordingService|void}
        */
 
     }, {
@@ -10323,7 +10522,7 @@
       * Note: Layers are ordered, but referenced externally by name; so, we need both container
       * types depending on which function is called (i.e. all_layers and layer_map).
       *
-      * @type {PlainObject.<string, Layer>}
+      * @type {PlainObject<string, Layer>}
       */
 
       this.layer_map = {};
@@ -10335,7 +10534,7 @@
       this.current_layer = null;
       /**
       * The nonce to use to uniquely identify elements across drawings.
-      * @type {!String}
+      * @type {!string}
       */
 
       this.nonce_ = '';
@@ -10385,7 +10584,7 @@
       }
       /**
        * @param {!(string|Integer)} n The nonce to set
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -10397,7 +10596,7 @@
       }
       /**
        * Clears any previously set nonce.
-       * @returns {undefined}
+       * @returns {void}
        */
 
     }, {
@@ -10633,7 +10832,7 @@
       }
       /**
       * @param {module:history.HistoryRecordingService} hrService
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -10681,7 +10880,7 @@
       }
       /**
       * @param {module:history.HistoryRecordingService} hrService
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -10743,7 +10942,7 @@
       /**
        * Updates layer system and sets the current layer to the
        * top-most layer (last `<g>` child of this drawing).
-       * @returns {undefined}
+       * @returns {void}
       */
 
     }, {
@@ -10841,6 +11040,8 @@
     }, {
       key: "cloneLayer",
       value: function cloneLayer(name, hrService) {
+        var _this = this;
+
         if (!this.current_layer) {
           return null;
         }
@@ -10856,17 +11057,15 @@
         var layer = new Layer(name, currentGroup, this.svgElem_);
         var group = layer.getGroup(); // Clone children
 
-        var children = currentGroup.childNodes;
+        var children = _toConsumableArray(currentGroup.childNodes);
 
-        for (var _index = 0; _index < children.length; _index++) {
-          var ch = children[_index];
-
-          if (ch.localName === 'title') {
-            continue;
+        children.forEach(function (child) {
+          if (child.localName === 'title') {
+            return;
           }
 
-          group.append(this.copyElem(ch));
-        }
+          group.append(_this.copyElem(child));
+        });
 
         if (hrService) {
           hrService.startBatchCommand('Duplicate Layer');
@@ -10954,7 +11153,7 @@
        * action.
        * @param {string} layerName - Name of the layer on which to set the opacity
        * @param {Float} opacity - A float value in the range 0.0-1.0
-       * @returns {undefined}
+       * @returns {void}
       */
 
     }, {
@@ -10978,7 +11177,7 @@
 
     }, {
       key: "copyElem",
-      value: function copyElem$$1(el) {
+      value: function copyElem$1(el) {
         var that = this;
 
         var getNextIdClosure = function getNextIdClosure() {
@@ -10997,7 +11196,7 @@
    * @function module:draw.randomizeIds
    * @param {boolean} enableRandomization - flag indicating if documents should have randomized ids
    * @param {draw.Drawing} currentDrawing
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var randomizeIds = function randomizeIds(enableRandomization, currentDrawing) {
@@ -11034,7 +11233,7 @@
   /**
    * @function module:draw.DrawCanvasInit#setCurrentGroup
    * @param {Element} cg
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
@@ -11055,7 +11254,7 @@
   /**
    * @function module:draw.DrawCanvasInit#clearSelection
    * @param {boolean} [noCall] - When `true`, does not call the "selected" handler
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
@@ -11065,25 +11264,25 @@
    * @param {module:svgcanvas.SvgCanvas#event:changed|module:svgcanvas.SvgCanvas#event:contextset} arg - Argument to pass through to the callback
    * function. If the event is "changed", a (single-item) array of `Element`s is
    * passed. If the event is "contextset", the arg is `null` or `Element`.
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
    * @function module:draw.DrawCanvasInit#addCommandToHistory
    * @param {Command} cmd
-   * @returns {undefined}
+   * @returns {void}
   */
 
   /**
    * @function module:draw.DrawCanvasInit#changeSVGContent
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var canvas_;
   /**
   * @function module:draw.init
   * @param {module:draw.DrawCanvasInit} canvas
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var init$3 = function init(canvas) {
@@ -11092,7 +11291,7 @@
   /**
   * Updates layer system.
   * @function module:draw.identifyLayers
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var identifyLayers = function identifyLayers() {
@@ -11107,7 +11306,7 @@
   * @param {string} name - The given name
   * @param {module:history.HistoryRecordingService} hrService
   * @fires module:svgcanvas.SvgCanvas#event:changed
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var createLayer = function createLayer(name, hrService) {
@@ -11123,7 +11322,7 @@
    * @param {string} name - The given name. If the layer name exists, a new name will be generated.
    * @param {module:history.HistoryRecordingService} hrService - History recording service
    * @fires module:svgcanvas.SvgCanvas#event:changed
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var cloneLayer = function cloneLayer(name, hrService) {
@@ -11296,7 +11495,7 @@
   /**
   * @function module:draw.mergeLayer
   * @param {module:history.HistoryRecordingService} hrService
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var mergeLayer = function mergeLayer(hrService) {
@@ -11308,7 +11507,7 @@
   /**
   * @function module:draw.mergeAllLayers
   * @param {module:history.HistoryRecordingService} hrService
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var mergeAllLayers = function mergeAllLayers(hrService) {
@@ -11322,7 +11521,7 @@
   * disabled elements enabled again.
   * @function module:draw.leaveContext
   * @fires module:svgcanvas.SvgCanvas#event:contextset
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var leaveContext = function leaveContext() {
@@ -11354,7 +11553,7 @@
   * @function module:draw.setContext
   * @param {Element} elem
   * @fires module:svgcanvas.SvgCanvas#event:contextset
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var setContext = function setContext(elem) {
@@ -11379,7 +11578,13 @@
     canvas_.call('contextset', canvas_.getCurrentGroup());
   };
 
-  var REVERSE_NS = getReverseNS(); // this defines which elements and attributes that we support
+  var REVERSE_NS = getReverseNS(); // Todo: Split out into core attributes, presentation attributes, etc. so consistent
+
+  /**
+   * This defines which elements and attributes that we support (or at least
+   * don't remove)
+   * @type {PlainObject}
+   */
 
   var svgWhiteList_ = {
     // SVG Elements
@@ -11391,6 +11596,7 @@
     desc: [],
     ellipse: ['class', 'clip-path', 'clip-rule', 'cx', 'cy', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'id', 'mask', 'opacity', 'requiredFeatures', 'rx', 'ry', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'style', 'systemLanguage', 'transform'],
     feGaussianBlur: ['class', 'color-interpolation-filters', 'id', 'requiredFeatures', 'stdDeviation'],
+    feMorphology: ['class', 'in', 'operator', 'radius'],
     filter: ['class', 'color-interpolation-filters', 'filterRes', 'filterUnits', 'height', 'id', 'primitiveUnits', 'requiredFeatures', 'width', 'x', 'xlink:href', 'y'],
     foreignObject: ['class', 'font-size', 'height', 'id', 'opacity', 'requiredFeatures', 'style', 'transform', 'width', 'x', 'y'],
     g: ['class', 'clip-path', 'clip-rule', 'id', 'display', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'mask', 'opacity', 'requiredFeatures', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'style', 'systemLanguage', 'transform', 'font-family', 'font-size', 'font-style', 'font-weight', 'text-anchor'],
@@ -11408,7 +11614,7 @@
     rect: ['class', 'clip-path', 'clip-rule', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'height', 'id', 'mask', 'opacity', 'requiredFeatures', 'rx', 'ry', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'style', 'systemLanguage', 'transform', 'width', 'x', 'y'],
     stop: ['class', 'id', 'offset', 'requiredFeatures', 'stop-color', 'stop-opacity', 'style', 'systemLanguage'],
     svg: ['class', 'clip-path', 'clip-rule', 'filter', 'id', 'height', 'mask', 'preserveAspectRatio', 'requiredFeatures', 'style', 'systemLanguage', 'viewBox', 'width', 'x', 'xmlns', 'xmlns:se', 'xmlns:xlink', 'y'],
-    switch: ['class', 'id', 'requiredFeatures', 'systemLanguage'],
+    "switch": ['class', 'id', 'requiredFeatures', 'systemLanguage'],
     symbol: ['class', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'font-family', 'font-size', 'font-style', 'font-weight', 'id', 'opacity', 'preserveAspectRatio', 'requiredFeatures', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'style', 'systemLanguage', 'transform', 'viewBox'],
     text: ['class', 'clip-path', 'clip-rule', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'font-family', 'font-size', 'font-style', 'font-weight', 'id', 'mask', 'opacity', 'requiredFeatures', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'style', 'systemLanguage', 'text-anchor', 'transform', 'x', 'xml:space', 'y'],
     textPath: ['class', 'id', 'method', 'requiredFeatures', 'spacing', 'startOffset', 'style', 'systemLanguage', 'transform', 'xlink:href'],
@@ -11475,7 +11681,7 @@
   * It only keeps what is allowed from our whitelist defined above.
   * @function module:sanitize.sanitizeSvg
   * @param {Text|Element} node - The DOM element to be checked (we'll also check its children) or text node to be cleaned up
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var sanitizeSvg = function sanitizeSvg(node) {
@@ -11538,7 +11744,9 @@
             case 'gradientTransform':
             case 'patternTransform':
               {
-                var val = attr.value.replace(/(\d)-/g, '$1 -');
+                var val = attr.value.replace(_wrapRegExp(/(\d)-/g, {
+                  digit: 1
+                }), '$<digit> -');
                 node.setAttribute(attrName, val);
                 break;
               }
@@ -11662,8 +11870,8 @@
   var editorContext_$2 = null;
   /**
   * @function module:coords.init
-  * @param {module:coords.EditorContext} editorContext
-  * @returns {undefined}
+  * @param {module:svgcanvas.SvgCanvas#event:pointsAdded} editorContext
+  * @returns {void}
   */
 
   var init$4 = function init(editorContext) {
@@ -11671,8 +11879,8 @@
   };
   /**
    * Applies coordinate changes to an element based on the given matrix.
-   * @function module:coords.remapElement
-   * @implements {module:path.EditorContext#remapElement}
+   * @name module:coords.remapElement
+   * @type {module:path.EditorContext#remapElement}
   */
 
   var remapElement = function remapElement(selected, changes, m) {
@@ -12046,16 +12254,16 @@
   /**
    * @function module:recalculate.EditorContext#setStartTransform
    * @param {string} transform
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
   * @function module:recalculate.init
   * @param {module:recalculate.EditorContext} editorContext
-  * @returns {undefined}
+  * @returns {void}
   */
 
-  var init$5 = function init$$1(editorContext) {
+  var init$5 = function init(editorContext) {
     context_ = editorContext;
   };
   /**
@@ -12064,7 +12272,7 @@
   * @param {string} attr - The clip-path attribute value with the clipPath's ID
   * @param {Float} tx - The translation's x value
   * @param {Float} ty - The translation's y value
-  * @returns {undefined}
+  * @returns {void}
   */
 
   var updateClipPath = function updateClipPath(attr, tx, ty) {
@@ -12370,6 +12578,7 @@
 
             var angle = getRotationAngle(child);
             oldStartTransform = context_.getStartTransform();
+            var childxforms = [];
             context_.setStartTransform(child.getAttribute('transform'));
 
             if (angle || hasMatrixTransform(childTlist)) {
@@ -12377,6 +12586,7 @@
               e2t.setMatrix(matrixMultiply(tm, sm, tmn, _m));
               childTlist.clear();
               childTlist.appendItem(e2t);
+              childxforms.push(e2t); // if not rotated or skewed, push the [T][S][-T] down to the child
             } else {
               // update the transform list with translate,scale,translate
               // slide the [T][S][-T] from the front to the back
@@ -12401,6 +12611,9 @@
               childTlist.appendItem(translateBack);
               childTlist.appendItem(scale);
               childTlist.appendItem(translateOrigin);
+              childxforms.push(translateBack);
+              childxforms.push(scale);
+              childxforms.push(translateOrigin); // logMatrix(translateBack.matrix);
               // logMatrix(scale.matrix);
             } // not rotated
 
@@ -12981,7 +13194,7 @@
     * Used to reset the id and element that the selector is attached to.
     * @param {Element} e - DOM element associated with this selector
     * @param {module:utilities.BBoxObject} bbox - Optional bbox to use for reset (prevents duplicate getBBox call).
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -12996,7 +13209,7 @@
       /**
       * Show the resize grips of this selector.
       * @param {boolean} show - Indicates whether grips should be shown or not
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -13015,7 +13228,7 @@
       /**
       * Updates the selector to match the element's size.
       * @param {module:utilities.BBoxObject} [bbox] - BBox to use for resize (prevents duplicate getBBox call).
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -13141,38 +13354,40 @@
         mgr.rotateGripConnector.setAttribute('y2', nbay - gripRadius * 5);
         mgr.rotateGrip.setAttribute('cx', nbax + nbaw / 2);
         mgr.rotateGrip.setAttribute('cy', nbay - gripRadius * 5); // }
+      } // STATIC methods
+
+      /**
+      * Updates cursors for corner grips on rotation so arrows point the right way.
+      * @param {Float} angle - Current rotation angle in degrees
+      * @returns {void}
+      */
+
+    }], [{
+      key: "updateGripCursors",
+      value: function updateGripCursors(angle) {
+        var dirArr = Object.keys(selectorManager_.selectorGrips);
+        var steps = Math.round(angle / 45);
+
+        if (steps < 0) {
+          steps += 8;
+        }
+
+        while (steps > 0) {
+          dirArr.push(dirArr.shift());
+          steps--;
+        }
+
+        Object.values(selectorManager_.selectorGrips).forEach(function (gripElement, i) {
+          gripElement.setAttribute('style', 'cursor:' + dirArr[i] + '-resize');
+        });
       }
     }]);
 
     return Selector;
   }();
   /**
-  * Updates cursors for corner grips on rotation so arrows point the right way.
-  * @param {Float} angle - Current rotation angle in degrees
-  * @returns {undefined}
-  */
-
-  Selector.updateGripCursors = function (angle) {
-    var dirArr = Object.keys(selectorManager_.selectorGrips);
-    var steps = Math.round(angle / 45);
-
-    if (steps < 0) {
-      steps += 8;
-    }
-
-    while (steps > 0) {
-      dirArr.push(dirArr.shift());
-      steps--;
-    }
-
-    Object.values(selectorManager_.selectorGrips).forEach(function (gripElement, i) {
-      gripElement.setAttribute('style', 'cursor:' + dirArr[i] + '-resize');
-    });
-  };
-  /**
   * Manage all selector objects (selection boxes).
   */
-
 
   var SelectorManager =
   /*#__PURE__*/
@@ -13206,7 +13421,7 @@
     }
     /**
     * Resets the parent selector group element.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -13361,7 +13576,7 @@
       * Removes the selector of the given element (hides selection box).
       *
       * @param {Element} elem - DOM element to remove the selector for
-      * @returns {undefined}
+      * @returns {void}
       */
 
     }, {
@@ -13447,7 +13662,7 @@
 
   /**
    * @function module:select.SVGFactory#getCurrentZoom
-   * @returns {Float}
+   * @returns {Float} The current zoom level
    */
 
   /**
@@ -13468,7 +13683,7 @@
    * @function module:select.init
    * @param {module:select.Config} config - An object containing configurable parameters (imgPath)
    * @param {module:select.SVGFactory} svgFactory - An object implementing the SVGFactory interface.
-   * @returns {undefined}
+   * @returns {void}
    */
 
   var init$6 = function init(config, svgFactory) {
@@ -13514,7 +13729,8 @@
     window.console.dir = function (str) {
       /* */
     };
-  }
+  } // Reenable after fixing eslint-plugin-jsdoc to handle
+
   /**
   * The main SvgCanvas class that manages all SVG-related functions.
   * @memberof module:svgcanvas
@@ -13590,7 +13806,7 @@
     /**
     * This function resets the svgcontent element while keeping it in the DOM.
     * @function module:svgcanvas.SvgCanvas#clearSvgContentElement
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var clearSvgContentElement = canvas.clearSvgContentElement = function () {
@@ -13619,7 +13835,7 @@
     * Changes the ID prefix to the given value.
     * @function module:svgcanvas.SvgCanvas#setIdPrefix
     * @param {string} p - String with the new prefix
-    * @returns {undefined}
+    * @returns {void}
     */
 
     canvas.setIdPrefix = function (p) {
@@ -13635,8 +13851,8 @@
     canvas.current_drawing_ = new Drawing(svgcontent, idprefix);
     /**
     * Returns the current Drawing.
-    * @function module:svgcanvas.SvgCanvas#getCurrentDrawing
-    * @implements {module:draw.DrawCanvasInit#getCurrentDrawing}
+    * @name module:svgcanvas.SvgCanvas#getCurrentDrawing
+    * @type {module:draw.DrawCanvasInit#getCurrentDrawing}
     */
 
     var getCurrentDrawing = canvas.getCurrentDrawing = function () {
@@ -13682,7 +13898,7 @@
     /**
     * @typedef {PlainObject} module:svgcanvas.SVGAsJSON
     * @property {string} element
-    * @property {PlainObject.<string, string>} attr
+    * @property {PlainObject<string, string>} attr
     * @property {module:svgcanvas.SVGAsJSON[]} children
     */
 
@@ -13715,8 +13931,8 @@
     };
     /**
     * This should really be an intersection implementing all rather than a union.
-    * @function module:svgcanvas.SvgCanvas#addSVGElementFromJson
-    * @implements {module:utilities.EditorContext#addSVGElementFromJson|module:path.EditorContext#addSVGElementFromJson}
+    * @name module:svgcanvas.SvgCanvas#addSVGElementFromJson
+    * @type {module:utilities.EditorContext#addSVGElementFromJson|module:path.EditorContext#addSVGElementFromJson}
     */
 
 
@@ -13752,10 +13968,10 @@
           'fill-opacity': curShape.fill_opacity,
           opacity: curShape.opacity / 2,
           style: 'pointer-events:inherit'
-        }, 100);
+        });
       }
 
-      assignAttributes(shape, data.attr, 100);
+      assignAttributes(shape, data.attr);
       cleanupElement(shape); // Children
 
       if (data.children) {
@@ -13772,7 +13988,7 @@
     canvas.hasMatrixTransform = hasMatrixTransform;
     canvas.transformListToTransform = transformListToTransform;
     /**
-    * @implements {module:utilities.EditorContext#getBaseUnit}
+    * @type {module:utilities.EditorContext#getBaseUnit}
     */
 
     var getBaseUnit = function getBaseUnit() {
@@ -13804,7 +14020,7 @@
     canvas.convertToNum = convertToNum;
     /**
     * This should really be an intersection implementing all rather than a union.
-    * @implements {module:draw.DrawCanvasInit#getSVGContent|module:utilities.EditorContext#getSVGContent}
+    * @type {module:draw.DrawCanvasInit#getSVGContent|module:utilities.EditorContext#getSVGContent}
     */
 
     var getSVGContent = function getSVGContent() {
@@ -13812,8 +14028,8 @@
     };
     /**
     * Should really be an intersection with all needing to apply rather than a union.
-    * @function module:svgcanvas.SvgCanvas#getSelectedElements
-    * @implements {module:utilities.EditorContext#getSelectedElements|module:draw.DrawCanvasInit#getSelectedElements|module:path.EditorContext#getSelectedElements}
+    * @name module:svgcanvas.SvgCanvas#getSelectedElements
+    * @type {module:utilities.EditorContext#getSelectedElements|module:draw.DrawCanvasInit#getSelectedElements|module:path.EditorContext#getSelectedElements}
     */
 
 
@@ -13821,10 +14037,10 @@
       return selectedElements;
     };
 
-    var pathActions$$1 = pathActions;
+    var pathActions$1 = pathActions;
     /**
     * This should actually be an intersection as all interfaces should be met.
-    * @implements {module:utilities.EditorContext#getSVGRoot|module:recalculate.EditorContext#getSVGRoot|module:coords.EditorContext#getSVGRoot|module:path.EditorContext#getSVGRoot}
+    * @type {module:utilities.EditorContext#getSVGRoot|module:recalculate.EditorContext#getSVGRoot|module:coords.EditorContext#getSVGRoot|module:path.EditorContext#getSVGRoot}
     */
 
     var getSVGRoot = function getSVGRoot() {
@@ -13836,7 +14052,7 @@
     * @implements {module:utilities.EditorContext}
     */
     {
-      pathActions: pathActions$$1,
+      pathActions: pathActions$1,
       // Ok since not modifying
       getSVGContent: getSVGContent,
       addSVGElementFromJson: addSVGElementFromJson,
@@ -13868,7 +14084,7 @@
     this.cleanupElement = cleanupElement;
     /**
     * This should actually be an intersection not a union as all should apply.
-    * @implements {module:coords.EditorContext|module:path.EditorContext}
+    * @type {module:coords.EditorContext#getGridSnapping|module:path.EditorContext#getGridSnapping}
     */
 
     var getGridSnapping = function getGridSnapping() {
@@ -13915,7 +14131,7 @@
        * @param {string} eventType One of the HistoryEvent types
        * @param {module:history.HistoryCommand} cmd Fulfills the HistoryCommand interface
        * @fires module:svgcanvas.SvgCanvas#event:changed
-       * @returns {undefined}
+       * @returns {void}
        */
       handleHistoryEvent: function handleHistoryEvent(eventType, cmd) {
         var EventTypes = HistoryEventTypes$1; // TODO: handle setBlurOffsets.
@@ -13982,8 +14198,8 @@
     });
     /**
     * This should really be an intersection applying to all types rather than a union.
-    * @function module:svgcanvas~addCommandToHistory
-    * @implements {module:path.EditorContext#addCommandToHistory|module:draw.DrawCanvasInit#addCommandToHistory}
+    * @name module:svgcanvas~addCommandToHistory
+    * @type {module:path.EditorContext#addCommandToHistory|module:draw.DrawCanvasInit#addCommandToHistory}
     */
 
     var addCommandToHistory = function addCommandToHistory(cmd) {
@@ -13991,8 +14207,8 @@
     };
     /**
     * This should really be an intersection applying to all types rather than a union.
-    * @function module:svgcanvas.SvgCanvas#getZoom
-    * @implements {module:path.EditorContext#getCurrentZoom|module:select.SVGFactory#getCurrentZoom}
+    * @name module:svgcanvas.SvgCanvas#getZoom
+    * @type {module:path.EditorContext#getCurrentZoom|module:select.SVGFactory#getCurrentZoom}
     */
 
 
@@ -14001,8 +14217,8 @@
     };
     /**
     * This method rounds the incoming value to the nearest value based on the `currentZoom`
-    * @function module:svgcanvas.SvgCanvas#round
-    * @implements {module:path.EditorContext#round}
+    * @name module:svgcanvas.SvgCanvas#round
+    * @type {module:path.EditorContext#round}
     */
 
 
@@ -14035,16 +14251,16 @@
 
     var selectorManager = this.selectorManager = getSelectorManager();
     /**
-    * @function module:svgcanvas.SvgCanvas#getNextId
-    * @implements {module:path.EditorContext#getNextId}
+    * @name module:svgcanvas.SvgCanvas#getNextId
+    * @type {module:path.EditorContext#getNextId}
     */
 
     var getNextId = canvas.getNextId = function () {
       return getCurrentDrawing().getNextId();
     };
     /**
-    * @function module:svgcanvas.SvgCanvas#getId
-    * @implements {module:path.EditorContext#getId}
+    * @name module:svgcanvas.SvgCanvas#getId
+    * @type {module:path.EditorContext#getId}
     */
 
 
@@ -14053,11 +14269,8 @@
     };
     /**
     * The "implements" should really be an intersection applying to all types rather than a union.
-    * @function module:svgcanvas.SvgCanvas#call
-    * @implements {module:draw.DrawCanvasInit#call|module:path.EditorContext#call}
-    * @param {"selected"|"changed"|"contextset"|"pointsAdded"|"extension_added"|"extensions_added"|"message"|"transition"|"zoomed"|"updateCanvas"|"zoomDone"|"saved"|"exported"|"exportedPDF"|"setnonce"|"unsetnonce"|"cleared"} ev - String with the event name
-    * @param {module:svgcanvas.SvgCanvas#event:GenericCanvasEvent} arg - Argument to pass through to the callback function.
-    * @returns {module:svgcanvas.EventHandlerReturn|undefined}
+    * @name module:svgcanvas.SvgCanvas#call
+    * @type {module:draw.DrawCanvasInit#call|module:path.EditorContext#call}
     */
 
 
@@ -14071,8 +14284,8 @@
     /**
     * Clears the selection. The 'selected' handler is then optionally called.
     * This should really be an intersection applying to all types rather than a union.
-    * @function module:svgcanvas.SvgCanvas#clearSelection
-    * @implements {module:draw.DrawCanvasInit#clearSelection|module:path.EditorContext#clearSelection}
+    * @name module:svgcanvas.SvgCanvas#clearSelection
+    * @type {module:draw.DrawCanvasInit#clearSelection|module:path.EditorContext#clearSelection}
     * @fires module:svgcanvas.SvgCanvas#event:selected
     */
 
@@ -14093,8 +14306,8 @@
     };
     /**
     * Adds a list of elements to the selection. The 'selected' handler is then called.
-    * @function module:svgcanvas.SvgCanvas#addToSelection
-    * @implements {module:path.EditorContext#addToSelection}
+    * @name module:svgcanvas.SvgCanvas#addToSelection
+    * @type {module:path.EditorContext#addToSelection}
     * @fires module:svgcanvas.SvgCanvas#event:selected
     */
 
@@ -14177,7 +14390,7 @@
       }
     };
     /**
-    * @implements {module:path.EditorContext#getOpacity}
+    * @type {module:path.EditorContext#getOpacity}
     */
 
 
@@ -14185,8 +14398,8 @@
       return curShape.opacity;
     };
     /**
-    * @function module:svgcanvas.SvgCanvas#getMouseTarget
-    * @implements {module:path.EditorContext#getMouseTarget}
+    * @name module:svgcanvas.SvgCanvas#getMouseTarget
+    * @type {module:path.EditorContext#getMouseTarget}
     */
 
 
@@ -14252,13 +14465,13 @@
     */
 
 
-    canvas.pathActions = pathActions$$1;
+    canvas.pathActions = pathActions$1;
     /**
-    * @implements {module:path.EditorContext#resetD}
+    * @type {module:path.EditorContext#resetD}
     */
 
     function resetD(p) {
-      p.setAttribute('d', pathActions$$1.convertPath(p));
+      p.setAttribute('d', pathActions$1.convertPath(p));
     }
 
     init$1(
@@ -14301,14 +14514,14 @@
        * @param {SVGCircleElement[]} ptsInfo.grips
        * @fires module:svgcanvas.SvgCanvas#event:pointsAdded
        * @fires module:svgcanvas.SvgCanvas#event:selected
-       * @returns {undefined}
+       * @returns {void}
        */
       addPtsToSelection: function addPtsToSelection(_ref) {
         var closedSubpath = _ref.closedSubpath,
             grips = _ref.grips;
         // TODO: Correct this:
-        pathActions$$1.canDeleteNodes = true;
-        pathActions$$1.closed_subpath = closedSubpath;
+        pathActions$1.canDeleteNodes = true;
+        pathActions$1.closed_subpath = closedSubpath;
         call('pointsAdded', {
           closedSubpath: closedSubpath,
           grips: grips
@@ -14321,7 +14534,7 @@
        * @param {ChangeElementCommand} changes.cmd
        * @param {SVGPathElement} changes.elem
        * @fires module:svgcanvas.SvgCanvas#event:changed
-       * @returns {undefined}
+       * @returns {void}
        */
       endChanges: function endChanges(_ref2) {
         var cmd = _ref2.cmd,
@@ -14448,14 +14661,14 @@
       });
     };
     /**
-    * @typedef {module:svgcanvas.ExtensionMouseDownStatus|module:svgcanvas.ExtensionMouseUpStatus|module:svgcanvas.ExtensionIDsUpdatedStatus|module:locale.ExtensionLocaleData[]|undefined} module:svgcanvas.ExtensionStatus
+    * @typedef {module:svgcanvas.ExtensionMouseDownStatus|module:svgcanvas.ExtensionMouseUpStatus|module:svgcanvas.ExtensionIDsUpdatedStatus|module:locale.ExtensionLocaleData[]|void} module:svgcanvas.ExtensionStatus
     * @tutorial ExtensionDocs
     */
 
     /**
     * @callback module:svgcanvas.ExtensionVarBuilder
     * @param {string} name The name of the extension
-    * @returns {module:svgcanvas.SvgCanvas#event:ext-addLangData}
+    * @returns {module:svgcanvas.SvgCanvas#event:ext_addLangData}
     */
 
     /**
@@ -14469,10 +14682,10 @@
     * @todo Would be easier to document if passing in object with key of action and vars as value; could then define an interface which tied both together
     * @function module:svgcanvas.SvgCanvas#runExtensions
     * @param {"mouseDown"|"mouseMove"|"mouseUp"|"zoomChanged"|"IDsUpdated"|"canvasUpdated"|"toolButtonStateUpdate"|"selectedChanged"|"elementTransition"|"elementChanged"|"langReady"|"langChanged"|"addLangData"|"onNewDocument"|"workareaResized"} action
-    * @param {module:svgcanvas.SvgCanvas#event:ext-mouseDown|module:svgcanvas.SvgCanvas#event:ext-mouseMove|module:svgcanvas.SvgCanvas#event:ext-mouseUp|module:svgcanvas.SvgCanvas#event:ext-zoomChanged|module:svgcanvas.SvgCanvas#event:ext-IDsUpdated|module:svgcanvas.SvgCanvas#event:ext-canvasUpdated|module:svgcanvas.SvgCanvas#event:ext-toolButtonStateUpdate|module:svgcanvas.SvgCanvas#event:ext-selectedChanged|module:svgcanvas.SvgCanvas#event:ext-elementTransition|module:svgcanvas.SvgCanvas#event:ext-elementChanged|module:svgcanvas.SvgCanvas#event:ext-langReady|module:svgcanvas.SvgCanvas#event:ext-langChanged|module:svgcanvas.SvgCanvas#event:ext-addLangData|module:svgcanvas.SvgCanvas#event:ext-onNewDocument|module:svgcanvas.SvgCanvas#event:ext-workareaResized|module:svgcanvas.ExtensionVarBuilder} [vars]
+    * @param {module:svgcanvas.SvgCanvas#event:ext_mouseDown|module:svgcanvas.SvgCanvas#event:ext_mouseMove|module:svgcanvas.SvgCanvas#event:ext_mouseUp|module:svgcanvas.SvgCanvas#event:ext_zoomChanged|module:svgcanvas.SvgCanvas#event:ext_IDsUpdated|module:svgcanvas.SvgCanvas#event:ext_canvasUpdated|module:svgcanvas.SvgCanvas#event:ext_toolButtonStateUpdate|module:svgcanvas.SvgCanvas#event:ext_selectedChanged|module:svgcanvas.SvgCanvas#event:ext_elementTransition|module:svgcanvas.SvgCanvas#event:ext_elementChanged|module:svgcanvas.SvgCanvas#event:ext_langReady|module:svgcanvas.SvgCanvas#event:ext_langChanged|module:svgcanvas.SvgCanvas#event:ext_addLangData|module:svgcanvas.SvgCanvas#event:ext_onNewDocument|module:svgcanvas.SvgCanvas#event:ext_workareaResized|module:svgcanvas.ExtensionVarBuilder} [vars]
     * @param {boolean} [returnArray]
     * @param {module:svgcanvas.ExtensionNameFilter} nameFilter
-    * @returns {GenericArray.<module:svgcanvas.ExtensionStatus>|module:svgcanvas.ExtensionStatus|false} See {@tutorial ExtensionDocs} on the ExtensionStatus.
+    * @returns {GenericArray<module:svgcanvas.ExtensionStatus>|module:svgcanvas.ExtensionStatus|false} See {@tutorial ExtensionDocs} on the ExtensionStatus.
     */
 
 
@@ -14516,113 +14729,113 @@
 
     /**
      * @interface module:svgcanvas.ExtensionInitResponse
-     * @property {module:SVGEditor.ContextTool[]|PlainObject.<string, module:SVGEditor.ContextTool>} [context_tools]
-     * @property {module:SVGEditor.Button[]|PlainObject.<Integer, module:SVGEditor.Button>} [buttons]
+     * @property {module:SVGEditor.ContextTool[]|PlainObject<string, module:SVGEditor.ContextTool>} [context_tools]
+     * @property {module:SVGEditor.Button[]|PlainObject<Integer, module:SVGEditor.Button>} [buttons]
      * @property {string} [svgicons] The location of a local SVG or SVGz file
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#mouseDown
-     * @param {module:svgcanvas.SvgCanvas#event:ext-mouseDown} arg
-     * @returns {undefined|module:svgcanvas.ExtensionMouseDownStatus}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_mouseDown} arg
+     * @returns {void|module:svgcanvas.ExtensionMouseDownStatus}
      */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#mouseMove
-     * @param {module:svgcanvas.SvgCanvas#event:ext-mouseMove} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_mouseMove} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#mouseUp
-     * @param {module:svgcanvas.SvgCanvas#event:ext-mouseUp} arg
+     * @param {module:svgcanvas.SvgCanvas#event:ext_mouseUp} arg
      * @returns {module:svgcanvas.ExtensionMouseUpStatus}
      */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#zoomChanged
-     * @param {module:svgcanvas.SvgCanvas#event:ext-zoomChanged} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_zoomChanged} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#IDsUpdated
-     * @param {module:svgcanvas.SvgCanvas#event:ext-IDsUpdated} arg
+     * @param {module:svgcanvas.SvgCanvas#event:ext_IDsUpdated} arg
      * @returns {module:svgcanvas.ExtensionIDsUpdatedStatus}
      */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#canvasUpdated
-     * @param {module:svgcanvas.SvgCanvas#event:ext-canvasUpdated} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_canvasUpdated} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#toolButtonStateUpdate
-     * @param {module:svgcanvas.SvgCanvas#event:ext-toolButtonStateUpdate} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_toolButtonStateUpdate} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#selectedChanged
-     * @param {module:svgcanvas.SvgCanvas#event:ext-selectedChanged} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_selectedChanged} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#elementTransition
-     * @param {module:svgcanvas.SvgCanvas#event:ext-elementTransition} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_elementTransition} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#elementChanged
-     * @param {module:svgcanvas.SvgCanvas#event:ext-elementChanged} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_elementChanged} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#langReady
-     * @param {module:svgcanvas.SvgCanvas#event:ext-langReady} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_langReady} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#langChanged
-     * @param {module:svgcanvas.SvgCanvas#event:ext-langChanged} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_langChanged} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#addLangData
-     * @param {module:svgcanvas.SvgCanvas#event:ext-addLangData} arg
-     * @returns {Promise} Resolves to {@link module:locale.ExtensionLocaleData}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_addLangData} arg
+     * @returns {Promise<module:locale.ExtensionLocaleData>} Resolves to {@link module:locale.ExtensionLocaleData}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#onNewDocument
-     * @param {module:svgcanvas.SvgCanvas#event:ext-onNewDocument} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_onNewDocument} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#workareaResized
-     * @param {module:svgcanvas.SvgCanvas#event:ext-workareaResized} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_workareaResized} arg
+     * @returns {void}
     */
 
     /**
      * @function module:svgcanvas.ExtensionInitResponse#callback
      * @this module:SVGEditor
-     * @param {module:svgcanvas.SvgCanvas#event:ext-callback} arg
-     * @returns {undefined}
+     * @param {module:svgcanvas.SvgCanvas#event:ext_callback} arg
+     * @returns {void}
     */
 
     /**
     * @callback module:svgcanvas.ExtensionInitCallback
     * @this module:SVGEditor
     * @param {module:svgcanvas.ExtensionArgumentObject} arg
-    * @returns {Promise} Resolves to [ExtensionInitResponse]{@link module:svgcanvas.ExtensionInitResponse} or `undefined`
+    * @returns {Promise<module:svgcanvas.ExtensionInitResponse|void>} Resolves to [ExtensionInitResponse]{@link module:svgcanvas.ExtensionInitResponse} or `undefined`
     */
 
     /**
@@ -14640,7 +14853,7 @@
     * @fires module:svgcanvas.SvgCanvas#event:extension_added
     * @throws {TypeError|Error} `TypeError` if `extInitFunc` is not a function, `Error`
     *   if extension of supplied name already exists
-    * @returns {Promise} Resolves to `undefined`
+    * @returns {Promise<void>} Resolves to `undefined`
     */
 
 
@@ -14704,7 +14917,8 @@
 
                 if (extObj) {
                   extObj.name = name;
-                }
+                } // eslint-disable-next-line require-atomic-updates
+
 
                 extensions[name] = extObj;
                 return _context.abrupt("return", call('extension_added', extObj));
@@ -14714,7 +14928,7 @@
                 return _context.stop();
             }
           }
-        }, _callee, this);
+        }, _callee);
       }));
 
       return function (_x, _x2, _x3) {
@@ -14760,7 +14974,7 @@
 
       var resultList = null;
 
-      if (!isIE) {
+      if (!isIE()) {
         if (typeof svgroot.getIntersectionList === 'function') {
           // Offset the bbox of the rubber box by the offset of the svgcontent element.
           rubberBBox.x += parseInt(svgcontent.getAttribute('x'));
@@ -14833,7 +15047,7 @@
     * Wrap an SVG element into a group element, mark the group as 'gsvg'.
     * @function module:svgcanvas.SvgCanvas#groupSvgElem
     * @param {Element} elem - SVG element to wrap
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -14908,17 +15122,17 @@
      * [`init()`]{@link module:svgcanvas.ExtensionInitCallback}
      * along with the name of the extension.
      * @event module:svgcanvas.SvgCanvas#event:extension_added
-     * @type {module:svgcanvas.ExtensionInitResponsePlusName|undefined}
+     * @type {module:svgcanvas.ExtensionInitResponsePlusName|void}
      */
 
     /**
      * @event module:svgcanvas.SvgCanvas#event:extensions_added
-     * @type {undefined}
+     * @type {void}
     */
 
     /**
      * @typedef {PlainObject} module:svgcanvas.Message
-     * @property {Any} data The data
+     * @property {any} data The data
      * @property {string} origin The origin
      */
 
@@ -14940,17 +15154,17 @@
 
     /**
      * @event module:svgcanvas.SvgCanvas#event:unsetnonce
-     * @type {undefined}
+     * @type {void}
      */
 
     /**
      * @event module:svgcanvas.SvgCanvas#event:zoomDone
-     * @type {undefined}
+     * @type {void}
     */
 
     /**
      * @event module:svgcanvas.SvgCanvas#event:cleared
-     * @type {undefined}
+     * @type {void}
     */
 
     /**
@@ -14967,13 +15181,13 @@
      * Creating a cover-all class until {@link https://github.com/jsdoc3/jsdoc/issues/1545} may be supported.
      * `undefined` may be returned by {@link module:svgcanvas.SvgCanvas#event:extension_added} if the extension's `init` returns `undefined` It is also the type for the following events "zoomDone", "unsetnonce", "cleared", and "extensions_added".
      * @event module:svgcanvas.SvgCanvas#event:GenericCanvasEvent
-     * @type {module:svgcanvas.SvgCanvas#event:selected|module:svgcanvas.SvgCanvas#event:changed|module:svgcanvas.SvgCanvas#event:contextset|module:svgcanvas.SvgCanvas#event:pointsAdded|module:svgcanvas.SvgCanvas#event:extension_added|module:svgcanvas.SvgCanvas#event:extensions_added|module:svgcanvas.SvgCanvas#event:message|module:svgcanvas.SvgCanvas#event:transition|module:svgcanvas.SvgCanvas#event:zoomed|module:svgcanvas.SvgCanvas#event:updateCanvas|module:svgcanvas.SvgCanvas#event:saved|module:svgcanvas.SvgCanvas#event:exported|module:svgcanvas.SvgCanvas#event:exportedPDF|module:svgcanvas.SvgCanvas#event:setnonce|module:svgcanvas.SvgCanvas#event:unsetnonce|undefined}
+     * @type {module:svgcanvas.SvgCanvas#event:selected|module:svgcanvas.SvgCanvas#event:changed|module:svgcanvas.SvgCanvas#event:contextset|module:svgcanvas.SvgCanvas#event:pointsAdded|module:svgcanvas.SvgCanvas#event:extension_added|module:svgcanvas.SvgCanvas#event:extensions_added|module:svgcanvas.SvgCanvas#event:message|module:svgcanvas.SvgCanvas#event:transition|module:svgcanvas.SvgCanvas#event:zoomed|module:svgcanvas.SvgCanvas#event:updateCanvas|module:svgcanvas.SvgCanvas#event:saved|module:svgcanvas.SvgCanvas#event:exported|module:svgcanvas.SvgCanvas#event:exportedPDF|module:svgcanvas.SvgCanvas#event:setnonce|module:svgcanvas.SvgCanvas#event:unsetnonce|void}
      */
 
     /**
      * The promise return, if present, resolves to `undefined`
      *  (`extension_added`, `exported`, `saved`)
-     * @typedef {Promise|undefined} module:svgcanvas.EventHandlerReturn
+     * @typedef {Promise<void>|void} module:svgcanvas.EventHandlerReturn
     */
 
     /**
@@ -15001,7 +15215,7 @@
     * Runs the SVG Document through the sanitizer and then updates its paths.
     * @function module:svgcanvas.SvgCanvas#prepareSvg
     * @param {XMLDocument} newDoc - The SVG DOM document
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -15010,9 +15224,9 @@
 
       var paths = _toConsumableArray(newDoc.getElementsByTagNameNS(NS.SVG, 'path'));
 
-      paths.forEach(function (path$$1) {
-        path$$1.setAttribute('d', pathActions$$1.convertPath(path$$1));
-        pathActions$$1.fixEnd(path$$1);
+      paths.forEach(function (path) {
+        path.setAttribute('d', pathActions$1.convertPath(path));
+        pathActions$1.fixEnd(path);
       });
     };
     /**
@@ -15053,7 +15267,7 @@
     * @param {string|Float} val - The new rotation angle in degrees
     * @param {boolean} preventUndo - Indicates whether the action should be undoable or not
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -15112,7 +15326,7 @@
     * adding the changes to a single batch command.
     * @function module:svgcanvas.SvgCanvas#recalculateAllSelectedDimensions
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -15140,7 +15354,7 @@
      * Debug tool to easily see the current matrix in the browser's console.
      * @function module:svgcanvas~logMatrix
      * @param {SVGMatrix} m The matrix
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -15160,7 +15374,7 @@
     * @function module:svgcanvas.SvgCanvas#selectOnly
     * @param {Element[]} elems - an array of DOM elements to be selected
     * @param {boolean} showGrips - Indicates whether the resize grips should be shown
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var selectOnly = this.selectOnly = function (elems, showGrips) {
@@ -15173,7 +15387,7 @@
     * Removes elements from the selection.
     * @function module:svgcanvas.SvgCanvas#removeFromSelection
     * @param {Element[]} elemsToRemove - An array of elements to remove from selection
-    * @returns {undefined}
+    * @returns {void}
     */
 
     /* const removeFromSelection = */
@@ -15212,7 +15426,7 @@
     /**
     * Clears the selection, then adds all elements in the current layer to the selection.
     * @function module:svgcanvas.SvgCanvas#selectAllInCurrentLayer
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -15297,8 +15511,8 @@
        * - When we are in select mode, select the element, remember the position
        *   and do nothing else.
        * @param {MouseEvent} evt
-       * @fires module:svgcanvas.SvgCanvas#event:ext-mouseDown
-       * @returns {undefined}
+       * @fires module:svgcanvas.SvgCanvas#event:ext_mouseDown
+       * @returns {void}
        */
 
 
@@ -15390,19 +15604,21 @@
 
                 addToSelection([mouseTarget]);
                 justSelected = mouseTarget;
-                pathActions$$1.clear();
+                pathActions$1.clear();
               } // else if it's a path, go into pathedit mode in mouseup
 
 
               if (!rightClick) {
                 // insert a dummy transform so if the element(s) are moved it will have
                 // a transform to use for its translate
-                for (var i = 0; i < selectedElements.length; ++i) {
-                  if (isNullish(selectedElements[i])) {
+                for (var _i2 = 0, _selectedElements = selectedElements; _i2 < _selectedElements.length; _i2++) {
+                  var selectedElement = _selectedElements[_i2];
+
+                  if (isNullish(selectedElement)) {
                     continue;
                   }
 
-                  var slist = getTransformList(selectedElements[i]);
+                  var slist = getTransformList(selectedElement);
 
                   if (slist.numberOfItems) {
                     slist.insertItemBefore(svgroot.createSVGTransform(), 0);
@@ -15431,7 +15647,7 @@
                 width: 0,
                 height: 0,
                 display: 'inline'
-              }, 100);
+              });
             }
 
             break;
@@ -15449,7 +15665,7 @@
               width: 0,
               height: 0,
               display: 'inline'
-            }, 100);
+            });
             break;
 
           case 'resize':
@@ -15488,12 +15704,11 @@
 
                   if (iswebkit) {
                     delayedStroke = function delayedStroke(ele) {
-                      var _stroke = ele.getAttribute('stroke');
-
+                      var stroke_ = ele.getAttribute('stroke');
                       ele.removeAttribute('stroke'); // Re-apply stroke after delay. Anything higher than 1 seems to cause flicker
 
-                      if (_stroke !== null) setTimeout(function () {
-                        ele.setAttribute('stroke', _stroke);
+                      if (stroke_ !== null) setTimeout(function () {
+                        ele.setAttribute('stroke', stroke_);
                       }, 0);
                     };
                   }
@@ -15507,16 +15722,16 @@
                   var all = mouseTarget.getElementsByTagName('*'),
                       len = all.length;
 
-                  for (var _i2 = 0; _i2 < len; _i2++) {
-                    if (!all[_i2].style) {
+                  for (var i = 0; i < len; i++) {
+                    if (!all[i].style) {
                       // mathML
                       continue;
                     }
 
-                    all[_i2].style.vectorEffect = 'non-scaling-stroke';
+                    all[i].style.vectorEffect = 'non-scaling-stroke';
 
                     if (iswebkit) {
-                      delayedStroke(all[_i2]);
+                      delayedStroke(all[i]);
                     }
                   }
                 }
@@ -15680,7 +15895,7 @@
           case 'pathedit':
             startX *= currentZoom;
             startY *= currentZoom;
-            pathActions$$1.mouseDown(evt, mouseTarget, startX, startY);
+            pathActions$1.mouseDown(evt, mouseTarget, startX, startY);
             started = true;
             break;
 
@@ -15703,7 +15918,7 @@
         }
         /**
          * The main (left) mouse button is held down on the canvas area
-         * @event module:svgcanvas.SvgCanvas#event:ext-mouseDown
+         * @event module:svgcanvas.SvgCanvas#event:ext_mouseDown
          * @type {PlainObject}
          * @property {MouseEvent} event The event object
          * @property {Float} start_x x coordinate on canvas
@@ -15713,7 +15928,7 @@
 
 
         var extResult = runExtensions('mouseDown',
-        /** @type {module:svgcanvas.SvgCanvas#event:ext-mouseDown} */
+        /** @type {module:svgcanvas.SvgCanvas#event:ext_mouseDown} */
         {
           event: evt,
           start_x: startX,
@@ -15732,8 +15947,8 @@
        *
        * @param {MouseEvent} evt
        * @fires module:svgcanvas.SvgCanvas#event:transition
-       * @fires module:svgcanvas.SvgCanvas#event:ext-mouseMove
-       * @returns {undefined}
+       * @fires module:svgcanvas.SvgCanvas#event:ext_mouseMove
+       * @returns {void}
        */
 
 
@@ -15847,7 +16062,7 @@
                 y: Math.min(rStartY, realY),
                 width: Math.abs(realX - rStartX),
                 height: Math.abs(realY - rStartY)
-              }, 100); // for each selected:
+              }); // for each selected:
               // - if newList contains selected, do nothing
               // - if newList doesn't contain selected, remove it from selected
               // - for any newList that was not in selectedElements, add it to selected
@@ -15995,7 +16210,7 @@
                 y: Math.min(rStartY * currentZoom, realY),
                 width: Math.abs(realX - rStartX * currentZoom),
                 height: Math.abs(realY - rStartY * currentZoom)
-              }, 100);
+              });
               break;
             }
 
@@ -16004,7 +16219,7 @@
               assignAttributes(shape, {
                 x: x,
                 y: y
-              }, 1000);
+              });
               break;
             }
 
@@ -16063,7 +16278,7 @@
                 height: h,
                 x: newX,
                 y: newY
-              }, 1000);
+              });
               break;
             }
 
@@ -16170,12 +16385,12 @@
               }
 
               if (evt.shiftKey) {
-                var path$$1 = path;
+                var path$1 = path;
                 var x1, y1;
 
-                if (path$$1) {
-                  x1 = path$$1.dragging ? path$$1.dragging[0] : startX;
-                  y1 = path$$1.dragging ? path$$1.dragging[1] : startY;
+                if (path$1) {
+                  x1 = path$1.dragging ? path$1.dragging[0] : startX;
+                  y1 = path$1.dragging ? path$1.dragging[1] : startY;
                 } else {
                   x1 = startX;
                   y1 = startY;
@@ -16195,10 +16410,10 @@
                   y: Math.min(rStartY * currentZoom, realY),
                   width: Math.abs(realX - rStartX * currentZoom),
                   height: Math.abs(realY - rStartY * currentZoom)
-                }, 100);
+                });
               }
 
-              pathActions$$1.mouseMove(x, y);
+              pathActions$1.mouseMove(x, y);
               break;
             }
 
@@ -16249,7 +16464,7 @@
         }
         /**
         * The mouse has moved on the canvas area
-        * @event module:svgcanvas.SvgCanvas#event:ext-mouseMove
+        * @event module:svgcanvas.SvgCanvas#event:ext_mouseMove
         * @type {PlainObject}
         * @property {MouseEvent} event The event object
         * @property {Float} mouse_x x coordinate on canvas
@@ -16259,7 +16474,7 @@
 
 
         runExtensions('mouseMove',
-        /** @type {module:svgcanvas.SvgCanvas#event:ext-mouseMove} */
+        /** @type {module:svgcanvas.SvgCanvas#event:ext_mouseMove} */
         {
           event: evt,
           mouse_x: mouseX,
@@ -16278,8 +16493,8 @@
        * @param {MouseEvent} evt
        * @fires module:svgcanvas.SvgCanvas#event:zoomed
        * @fires module:svgcanvas.SvgCanvas#event:changed
-       * @fires module:svgcanvas.SvgCanvas#event:ext-mouseUp
-       * @returns {undefined}
+       * @fires module:svgcanvas.SvgCanvas#event:ext_mouseUp
+       * @returns {void}
        */
 
 
@@ -16375,7 +16590,7 @@
                 t = evt.target;
 
                 if (selectedElements[0].nodeName === 'path' && isNullish(selectedElements[1])) {
-                  pathActions$$1.select(selectedElements[0]); // if it was a path
+                  pathActions$1.select(selectedElements[0]); // if it was a path
                   // else, if it was selected and this is a shift-click, remove it from selection
                 } else if (evt.shiftKey) {
                   if (tempJustSelected !== t) {
@@ -16444,13 +16659,13 @@
               var commaIndex = coords.indexOf(',');
 
               if (commaIndex >= 0) {
-                keep = coords.indexOf(',', commaIndex + 1) >= 0;
+                keep = coords.includes(',', commaIndex + 1);
               } else {
-                keep = coords.indexOf(' ', coords.indexOf(' ') + 1) >= 0;
+                keep = coords.includes(' ', coords.indexOf(' ') + 1);
               }
 
               if (keep) {
-                element = pathActions$$1.smoothPolylineIntoPath(element);
+                element = pathActions$1.smoothPolylineIntoPath(element);
               }
 
               break;
@@ -16529,7 +16744,7 @@
               element = null; // continue to be set to true so that mouseMove happens
 
               started = true;
-              var res = pathActions$$1.mouseUp(evt, element, mouseX, mouseY);
+              var res = pathActions$1.mouseUp(evt, element, mouseX, mouseY);
               element = res.element;
               keep = res.keep;
               break;
@@ -16538,7 +16753,7 @@
           case 'pathedit':
             keep = true;
             element = null;
-            pathActions$$1.mouseUp(evt);
+            pathActions$1.mouseUp(evt);
             break;
 
           case 'textedit':
@@ -16570,7 +16785,7 @@
         }
         /**
         * The main (left) mouse button is released (anywhere)
-        * @event module:svgcanvas.SvgCanvas#event:ext-mouseUp
+        * @event module:svgcanvas.SvgCanvas#event:ext_mouseUp
         * @type {PlainObject}
         * @property {MouseEvent} event The event object
         * @property {Float} mouse_x x coordinate on canvas
@@ -16579,7 +16794,7 @@
 
 
         var extResult = runExtensions('mouseUp',
-        /** @type {module:svgcanvas.SvgCanvas#event:ext-mouseUp} */
+        /** @type {module:svgcanvas.SvgCanvas#event:ext_mouseUp} */
         {
           event: evt,
           mouse_x: mouseX,
@@ -16649,7 +16864,7 @@
             cleanupElement(element);
 
             if (currentMode === 'path') {
-              pathActions$$1.toEditMode(element);
+              pathActions$1.toEditMode(element);
             } else if (curConfig.selectNew) {
               selectOnly([element], true);
             } // we create the insert command that is stored on the stack
@@ -16719,7 +16934,7 @@
        * @param {Event} e
        * @fires module:svgcanvas.SvgCanvas#event:updateCanvas
        * @fires module:svgcanvas.SvgCanvas#event:zoomDone
-       * @returns {undefined}
+       * @returns {void}
        */
       function (e) {
         if (!e.shiftKey) {
@@ -16821,7 +17036,7 @@
       /**
        *
        * @param {Integer} index
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function setCursor(index) {
@@ -16885,7 +17100,7 @@
        * @param {Integer} start
        * @param {Integer} end
        * @param {boolean} skipInput
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -16970,7 +17185,7 @@
        *
        * @param {Float} mouseX
        * @param {Float} mouseY
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -16982,7 +17197,7 @@
        * @param {Float} x
        * @param {Float} y
        * @param {boolean} apply
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -17053,7 +17268,7 @@
       /**
        *
        * @param {Event} evt
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -17064,7 +17279,7 @@
       /**
        *
        * @param {Event} evt
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -17097,7 +17312,7 @@
           * @param {Element} target
           * @param {Float} x
           * @param {Float} y
-          * @returns {undefined}
+          * @returns {void}
           */
           select: function select(target, x, y) {
             curtext = target;
@@ -17106,7 +17321,7 @@
 
           /**
           * @param {Element} elem
-          * @returns {undefined}
+          * @returns {void}
           */
           start: function start(elem) {
             curtext = elem;
@@ -17118,7 +17333,7 @@
           * @param {Element} mouseTarget
           * @param {Float} startX
           * @param {Float} startY
-          * @returns {undefined}
+          * @returns {void}
           */
           mouseDown: function mouseDown(evt, mouseTarget, startX, startY) {
             var pt = screenToPt(startX, startY);
@@ -17131,7 +17346,7 @@
           /**
           * @param {Float} mouseX
           * @param {Float} mouseY
-          * @returns {undefined}
+          * @returns {void}
           */
           mouseMove: function mouseMove(mouseX, mouseY) {
             var pt = screenToPt(mouseX, mouseY);
@@ -17142,7 +17357,7 @@
           * @param {external:MouseEvent} evt
           * @param {Float} mouseX
           * @param {Float} mouseY
-          * @returns {undefined}
+          * @returns {void}
           */
           mouseUp: function mouseUp(evt, mouseX, mouseY) {
             var pt = screenToPt(mouseX, mouseY);
@@ -17160,14 +17375,14 @@
           /**
           * @function
           * @param {Integer} index
-          * @returns {undefined}
+          * @returns {void}
           */
           setCursor: setCursor,
 
           /**
           * @param {Float} x
           * @param {Float} y
-          * @returns {undefined}
+          * @returns {void}
           */
           toEditMode: function toEditMode(x, y) {
             allowDbl = false;
@@ -17200,7 +17415,7 @@
           /**
           * @param {boolean|Element} selectElem
           * @fires module:svgcanvas.SvgCanvas#event:selected
-          * @returns {undefined}
+          * @returns {void}
           */
           toSelectMode: function toSelectMode(selectElem) {
             currentMode = 'select';
@@ -17237,14 +17452,14 @@
 
           /**
           * @param {Element} elem
-          * @returns {undefined}
+          * @returns {void}
           */
           setInputElem: function setInputElem(elem) {
             textinput = elem; // $(textinput).blur(hideCursor);
           },
 
           /**
-          * @returns {undefined}
+          * @returns {void}
           */
           clear: function clear() {
             if (currentMode === 'textedit') {
@@ -17254,9 +17469,9 @@
 
           /**
           * @param {Element} inputElem Not in use
-          * @returns {undefined}
+          * @returns {void}
           */
-          init: function init$$1(inputElem) {
+          init: function init(inputElem) {
             if (!curtext) {
               return;
             }
@@ -17399,7 +17614,7 @@
       while (removeUnusedDefElems() > 0) {} // eslint-disable-line no-empty
 
 
-      pathActions$$1.clear(true); // Keep SVG-Edit comment on top
+      pathActions$1.clear(true); // Keep SVG-Edit comment on top
 
       $$9.each(svgcontent.childNodes, function (i, node) {
         if (i && node.nodeType === 8 && node.data.includes('Created with')) {
@@ -17566,7 +17781,7 @@
               out.push(' ');
 
               if (_attr.localName === 'd') {
-                _attrVal = pathActions$$1.convertPath(elem, true);
+                _attrVal = pathActions$1.convertPath(elem, true);
               }
 
               if (!isNaN(_attrVal)) {
@@ -17670,14 +17885,14 @@
      * Function to run when image data is found
      * @callback module:svgcanvas.ImageEmbeddedCallback
      * @param {string|false} result Data URL
-     * @returns {undefined}
+     * @returns {void}
      */
 
     /**
     * Converts a given image file to a data URL when possible, then runs a given callback.
     * @function module:svgcanvas.SvgCanvas#embedImage
     * @param {string} src - The path/URL of the image
-    * @returns {Promise} Resolves to Data URL (string|false)
+    * @returns {Promise<string|false>} Resolves to a Data URL (string|false)
     */
 
 
@@ -17716,7 +17931,7 @@
     * Sets a given URL to be a "last good image" URL.
     * @function module:svgcanvas.SvgCanvas#setGoodImage
     * @param {string} val
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -17726,7 +17941,7 @@
     /**
     * Does nothing by default, handled by optional widget/extension.
     * @function module:svgcanvas.SvgCanvas#open
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -17740,7 +17955,7 @@
     * @function module:svgcanvas.SvgCanvas#save
     * @param {module:svgcanvas.SaveOptions} opts
     * @fires module:svgcanvas.SvgCanvas#event:saved
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -17829,7 +18044,7 @@
     * @param {boolean} [opts.avoidEvent]
     * @fires module:svgcanvas.SvgCanvas#event:exported
     * @todo Confirm/fix ICO type
-    * @returns {Promise} Resolves to {@link module:svgcanvas.ImageExportedResults}
+    * @returns {Promise<module:svgcanvas.ImageExportedResults>} Resolves to {@link module:svgcanvas.ImageExportedResults}
     */
 
     this.rasterExport =
@@ -17894,7 +18109,7 @@
                   var bloburl;
                   /**
                    * Called when `bloburl` is available for export.
-                   * @returns {undefined}
+                   * @returns {void}
                    */
 
                   function done() {
@@ -17946,7 +18161,7 @@
      */
 
     /**
-     * @typedef {undefined|"save"|"arraybuffer"|"blob"|"datauristring"|"dataurlstring"|"dataurlnewwindow"|"datauri"|"dataurl"} external:jsPDF.OutputType
+     * @typedef {void|"save"|"arraybuffer"|"blob"|"datauristring"|"dataurlstring"|"dataurlnewwindow"|"datauri"|"dataurl"} external:jsPDF.OutputType
      * @todo Newer version to add also allows these `outputType` values "bloburi"|"bloburl" which return strings, so document here and for `outputType` of `module:svgcanvas.PDFExportedResults` below if added
     */
 
@@ -17976,7 +18191,7 @@
     * @param {string} [exportWindowName] Will also be used for the download file name here
     * @param {external:jsPDF.OutputType} [outputType="dataurlstring"]
     * @fires module:svgcanvas.SvgCanvas#event:exportedPDF
-    * @returns {Promise} Resolves to {@link module:svgcanvas.PDFExportedResults}
+    * @returns {Promise<module:svgcanvas.PDFExportedResults>} Resolves to {@link module:svgcanvas.PDFExportedResults}
     */
 
 
@@ -18096,7 +18311,7 @@
     * @function module:svgcanvas.SvgCanvas#randomizeIds
     * @param {boolean} [enableRandomization] If true, adds a nonce to the prefix. Thus
     * `svgCanvas.randomizeIds() <==> svgCanvas.randomizeIds(true)`
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18111,7 +18326,7 @@
     * Ensure each element has a unique ID.
     * @function module:svgcanvas.SvgCanvas#uniquifyElems
     * @param {Element} g - The parent element of the tree to give unique IDs
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18225,7 +18440,7 @@
     * Assigns reference data for each use element.
     * @function module:svgcanvas.SvgCanvas#setUseData
     * @param {Element} parent
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18255,7 +18470,7 @@
     * Converts gradients from userSpaceOnUse to objectBoundingBox.
     * @function module:svgcanvas.SvgCanvas#convertGradients
     * @param {Element} elem
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18340,7 +18555,7 @@
     * @function module:svgcanvas.SvgCanvas#convertToGroup
     * @param {Element} elem
     * @fires module:svgcanvas.SvgCanvas#event:selected
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18522,10 +18737,12 @@
           if (val) {
             if (val.startsWith('data:')) {
               // Check if an SVG-edit data URI
-              var m = val.match(/svgedit_url=(.*?);/);
+              var m = val.match(_wrapRegExp(/svgedit_url=(.*?);/, {
+                url: 1
+              }));
 
               if (m) {
-                var url = decodeURIComponent(m[1]);
+                var url = decodeURIComponent(m.groups.url);
                 $$9(new Image()).load(function () {
                   image.setAttributeNS(NS.XLINK, 'xlink:href', url);
                 }).attr('src', url);
@@ -18724,10 +18941,29 @@
           }
 
           var attrs = svg.attributes;
+          var _iteratorNormalCompletion = true;
+          var _didIteratorError = false;
+          var _iteratorError = undefined;
 
-          for (var i = 0; i < attrs.length; i++) {
-            var attr = attrs[i];
-            symbol.setAttribute(attr.nodeName, attr.value);
+          try {
+            for (var _iterator = attrs[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+              var attr = _step.value;
+              // Ok for `NamedNodeMap`
+              symbol.setAttribute(attr.nodeName, attr.value);
+            }
+          } catch (err) {
+            _didIteratorError = true;
+            _iteratorError = err;
+          } finally {
+            try {
+              if (!_iteratorNormalCompletion && _iterator["return"] != null) {
+                _iterator["return"]();
+              }
+            } finally {
+              if (_didIteratorError) {
+                throw _iteratorError;
+              }
+            }
           }
 
           symbol.id = getNextId(); // Store data
@@ -18795,7 +19031,7 @@
     * @implements {module:draw.DrawCanvasInit}
     */
     {
-      pathActions: pathActions$$1,
+      pathActions: pathActions$1,
       getCurrentGroup: function getCurrentGroup() {
         return currentGroup;
       },
@@ -18813,7 +19049,7 @@
 
       /**
        * @fires module:svgcanvas.SvgCanvas#event:changed
-       * @returns {undefined}
+       * @returns {void}
        */
       changeSVGContent: function changeSVGContent() {
         call('changed', [svgcontent]);
@@ -18827,11 +19063,11 @@
     * Clears the current document. This is not an undoable action.
     * @function module:svgcanvas.SvgCanvas#clear
     * @fires module:svgcanvas.SvgCanvas#event:cleared
-    * @returns {undefined}
+    * @returns {void}
     */
 
     this.clear = function () {
-      pathActions$$1.clear();
+      pathActions$1.clear();
       clearSelection(); // clear the svgcontent node
 
       canvas.clearSvgContentElement(); // create new document
@@ -18849,7 +19085,7 @@
     }; // Alias function
 
 
-    this.linkControlPoints = pathActions$$1.linkControlPoints;
+    this.linkControlPoints = pathActions$1.linkControlPoints;
     /**
     * @function module:svgcanvas.SvgCanvas#getContentElem
     * @returns {Element} The content DOM element
@@ -18913,7 +19149,7 @@
     * Update interface strings with given values.
     * @function module:svgcanvas.SvgCanvas#setUiStrings
     * @param {module:path.uiStrings} strs - Object with strings (see the [locales API]{@link module:locale.LocaleStrings} and the [tutorial]{@tutorial LocaleDocs})
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18926,7 +19162,7 @@
     * Update configuration options with given values.
     * @function module:svgcanvas.SvgCanvas#setConfig
     * @param {module:SVGEditor.Config} opts - Object with options
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18936,7 +19172,7 @@
     /**
     * @function module:svgcanvas.SvgCanvas#getTitle
     * @param {Element} [elem]
-    * @returns {string|undefined} the current group/SVG's title contents or
+    * @returns {string|void} the current group/SVG's title contents or
     * `undefined` if no element is passed nd there are no selected elements.
     */
 
@@ -18950,10 +19186,30 @@
 
       elem = $$9(elem).data('gsvg') || $$9(elem).data('symbol') || elem;
       var childs = elem.childNodes;
+      var _iteratorNormalCompletion2 = true;
+      var _didIteratorError2 = false;
+      var _iteratorError2 = undefined;
 
-      for (var i = 0; i < childs.length; i++) {
-        if (childs[i].nodeName === 'title') {
-          return childs[i].textContent;
+      try {
+        for (var _iterator2 = childs[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+          var child = _step2.value;
+
+          if (child.nodeName === 'title') {
+            return child.textContent;
+          }
+        }
+      } catch (err) {
+        _didIteratorError2 = true;
+        _iteratorError2 = err;
+      } finally {
+        try {
+          if (!_iteratorNormalCompletion2 && _iterator2["return"] != null) {
+            _iterator2["return"]();
+          }
+        } finally {
+          if (_didIteratorError2) {
+            throw _iteratorError2;
+          }
         }
       }
 
@@ -18964,7 +19220,7 @@
     * @function module:svgcanvas.SvgCanvas#setGroupTitle
     * @param {string} val
     * @todo Combine this with `setDocumentTitle`
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -18999,7 +19255,7 @@
     };
     /**
     * @function module:svgcanvas.SvgCanvas#getDocumentTitle
-    * @returns {string|undefined} The current document title or an empty string if not found
+    * @returns {string|void} The current document title or an empty string if not found
     */
 
 
@@ -19011,7 +19267,7 @@
     * This is an undoable action.
     * @function module:svgcanvas.SvgCanvas#setDocumentTitle
     * @param {string} newTitle - String with the new title
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19020,12 +19276,32 @@
       var docTitle = false,
           oldTitle = '';
       var batchCmd = new BatchCommand$1('Change Image Title');
+      var _iteratorNormalCompletion3 = true;
+      var _didIteratorError3 = false;
+      var _iteratorError3 = undefined;
 
-      for (var i = 0; i < childs.length; i++) {
-        if (childs[i].nodeName === 'title') {
-          docTitle = childs[i];
-          oldTitle = docTitle.textContent;
-          break;
+      try {
+        for (var _iterator3 = childs[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
+          var child = _step3.value;
+
+          if (child.nodeName === 'title') {
+            docTitle = child;
+            oldTitle = docTitle.textContent;
+            break;
+          }
+        }
+      } catch (err) {
+        _didIteratorError3 = true;
+        _iteratorError3 = err;
+      } finally {
+        try {
+          if (!_iteratorNormalCompletion3 && _iterator3["return"] != null) {
+            _iterator3["return"]();
+          }
+        } finally {
+          if (_didIteratorError3) {
+            throw _iteratorError3;
+          }
         }
       }
 
@@ -19156,7 +19432,7 @@
     * @param {"selection"|"canvas"|"content"|"layer"|module:SVGEditor.BBoxObjectWithFactor} val - Bounding box object to zoom to or string indicating zoom option. Note: the object value type is defined in `svg-editor.js`
     * @param {Integer} editorW - The editor's workarea box's width
     * @param {Integer} editorH - The editor's workarea box's height
-    * @returns {module:svgcanvas.ZoomAndBBox|undefined}
+    * @returns {module:svgcanvas.ZoomAndBBox|void}
     */
 
 
@@ -19242,13 +19518,13 @@
     };
     /**
     * The zoom level has changed. Supplies the new zoom level as a number (not percentage).
-    * @event module:svgcanvas.SvgCanvas#event:ext-zoomChanged
+    * @event module:svgcanvas.SvgCanvas#event:ext_zoomChanged
     * @type {Float}
     */
 
     /**
     * The bottom panel was updated
-    * @event module:svgcanvas.SvgCanvas#event:ext-toolButtonStateUpdate
+    * @event module:svgcanvas.SvgCanvas#event:ext_toolButtonStateUpdate
     * @type {PlainObject}
     * @property {boolean} nofill Indicates fill is disabled
     * @property {boolean} nostroke Indicates stroke is disabled
@@ -19256,7 +19532,7 @@
 
     /**
     * The element selection has changed (elements were added/removed from selection)
-    * @event module:svgcanvas.SvgCanvas#event:ext-selectedChanged
+    * @event module:svgcanvas.SvgCanvas#event:ext_selectedChanged
     * @type {PlainObject}
     * @property {Element[]} elems Array of the newly selected elements
     * @property {Element|null} selectedElement The single selected element
@@ -19266,21 +19542,21 @@
     /**
     * Called when part of element is in process of changing, generally on
     * mousemove actions like rotate, move, etc.
-    * @event module:svgcanvas.SvgCanvas#event:ext-elementTransition
+    * @event module:svgcanvas.SvgCanvas#event:ext_elementTransition
     * @type {PlainObject}
     * @property {Element[]} elems Array of transitioning elements
     */
 
     /**
     * One or more elements were changed
-    * @event module:svgcanvas.SvgCanvas#event:ext-elementChanged
+    * @event module:svgcanvas.SvgCanvas#event:ext_elementChanged
     * @type {PlainObject}
     * @property {Element[]} elems Array of the affected elements
     */
 
     /**
     * Invoked as soon as the locale is ready
-    * @event module:svgcanvas.SvgCanvas#event:ext-langReady
+    * @event module:svgcanvas.SvgCanvas#event:ext_langReady
     * @type {PlainObject}
     * @property {string} lang The two-letter language code
     * @property {module:SVGEditor.uiStrings} uiStrings
@@ -19289,13 +19565,13 @@
 
     /**
     * The language was changed. Two-letter code of the new language.
-    * @event module:svgcanvas.SvgCanvas#event:ext-langChanged
+    * @event module:svgcanvas.SvgCanvas#event:ext_langChanged
     * @type {string}
     */
 
     /**
     * Means for an extension to add locale data. The two-letter language code.
-    * @event module:svgcanvas.SvgCanvas#event:ext-addLangData
+    * @event module:svgcanvas.SvgCanvas#event:ext_addLangData
     * @type {PlainObject}
     * @property {string} lang
     * @property {module:SVGEditor~ImportLocale} importLocale
@@ -19303,29 +19579,29 @@
 
     /**
      * Called when new image is created
-     * @event module:svgcanvas.SvgCanvas#event:ext-onNewDocument
-     * @type {undefined}
+     * @event module:svgcanvas.SvgCanvas#event:ext_onNewDocument
+     * @type {void}
      */
 
     /**
      * Called when sidepanel is resized or toggled
-     * @event module:svgcanvas.SvgCanvas#event:ext-workareaResized
-     * @type {undefined}
+     * @event module:svgcanvas.SvgCanvas#event:ext_workareaResized
+     * @type {void}
     */
 
     /**
      * Called upon addition of the extension, or, if svgicons are set,
      * after the icons are ready when extension SVG icons have loaded.
-     * @event module:svgcanvas.SvgCanvas#event:ext-callback
-     * @type {undefined}
+     * @event module:svgcanvas.SvgCanvas#event:ext_callback
+     * @type {void}
     */
 
     /**
     * Sets the zoom to the given level.
     * @function module:svgcanvas.SvgCanvas#setZoom
     * @param {Float} zoomLevel - Float indicating the zoom level to change to
-    * @fires module:svgcanvas.SvgCanvas#event:ext-zoomChanged
-    * @returns {undefined}
+    * @fires module:svgcanvas.SvgCanvas#event:ext_zoomChanged
+    * @returns {void}
     */
 
 
@@ -19340,9 +19616,9 @@
 
         selectorManager.requestSelector(elem).resize();
       });
-      pathActions$$1.zoomChange();
+      pathActions$1.zoomChange();
       runExtensions('zoomChanged',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-zoomChanged} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_zoomChanged} */
       zoomLevel);
     };
     /**
@@ -19358,12 +19634,12 @@
     * Sets the editor's mode to the given string.
     * @function module:svgcanvas.SvgCanvas#setMode
     * @param {string} name - String with the new mode to change to
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
     this.setMode = function (name) {
-      pathActions$$1.clear(true);
+      pathActions$1.clear(true);
       textActions.clear();
       curProperties = selectedElements[0] && selectedElements[0].nodeName === 'text' ? curText : curShape;
       currentMode = name;
@@ -19394,7 +19670,7 @@
     * @param {string} val - The value to set the stroke attribute to
     * @param {boolean} preventUndo - Boolean indicating whether or not this should be an undoable option
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19407,7 +19683,7 @@
       /**
        *
        * @param {Element} e
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function addNonG(e) {
@@ -19447,7 +19723,7 @@
     * Apply the current gradient to selected element's fill or stroke.
     * @function module:svgcanvas.SvgCanvas#setGradient
     * @param {"fill"|"stroke"} type - String indicating "fill" or "stroke" to apply to an element
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19545,7 +19821,7 @@
     * @function module:svgcanvas.SvgCanvas#setPaint
     * @param {"fill"|"stroke"} type - String with "fill" or "stroke"
     * @param {module:jGraduate.jGraduatePaintOptions} paint - The jGraduate paint object to apply
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19571,7 +19847,7 @@
     /**
     * @function module:svgcanvas.SvgCanvas#setStrokePaint
     * @param {module:jGraduate~Paint} paint
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19581,7 +19857,7 @@
     /**
     * @function module:svgcanvas.SvgCanvas#setFillPaint
     * @param {module:jGraduate~Paint} paint
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19603,7 +19879,7 @@
     * @function module:svgcanvas.SvgCanvas#setStrokeWidth
     * @param {Float} val - A Float indicating the new stroke width value
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19618,7 +19894,7 @@
       /**
        *
        * @param {Element} e
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function addNonG(e) {
@@ -19652,7 +19928,7 @@
     * @param {string} attr - String with the attribute name
     * @param {string|Float} val - String or number with the attribute value
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19715,7 +19991,7 @@
     * Sets the given opacity on the current selected elements.
     * @function module:svgcanvas.SvgCanvas#setOpacity
     * @param {string} val
-    * @returns {undefined}
+    * @returns {void}
     */
 
     this.setOpacity = function (val) {
@@ -19746,7 +20022,7 @@
     * @param {string} type - String with "fill" or "stroke"
     * @param {Float} val - Float with the new opacity value
     * @param {boolean} preventUndo - Indicates whether or not this should be an undoable action
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19804,7 +20080,7 @@
       * Sets the `stdDeviation` blur value on the selected element without being undoable.
       * @function module:svgcanvas.SvgCanvas#setBlurNoUndo
       * @param {Float} val - The new `stdDeviation` value
-      * @returns {undefined}
+      * @returns {void}
       */
 
       canvas.setBlurNoUndo = function (val) {
@@ -19837,7 +20113,7 @@
       };
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -19854,7 +20130,7 @@
       * @function module:svgcanvas.SvgCanvas#setBlurOffsets
       * @param {Element} filterElem - The filter DOM element to update
       * @param {Float} stdDev - The standard deviation value on which to base the offset size
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -19866,7 +20142,7 @@
             y: '-50%',
             width: '200%',
             height: '200%'
-          }, 100); // Removing these attributes hides text in Chrome (see Issue 579)
+          }); // Removing these attributes hides text in Chrome (see Issue 579)
         } else if (!isWebkit()) {
           filterElem.removeAttribute('x');
           filterElem.removeAttribute('y');
@@ -19879,7 +20155,7 @@
       * @function module:svgcanvas.SvgCanvas#setBlur
       * @param {Float} val - Float with the new `stdDeviation` blur value
       * @param {boolean} complete - Whether or not the action should be completed (to add to the undo manager)
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -19905,7 +20181,7 @@
           var newblur = addSVGElementFromJson({
             element: 'feGaussianBlur',
             attr: {
-              in: 'SourceGraphic',
+              "in": 'SourceGraphic',
               stdDeviation: val
             }
           });
@@ -19963,7 +20239,7 @@
     * Make the selected element bold or normal.
     * @function module:svgcanvas.SvgCanvas#setBold
     * @param {boolean} b - Indicates bold (`true`) or normal (`false`)
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -19998,7 +20274,7 @@
     * Make the selected element italic or normal.
     * @function module:svgcanvas.SvgCanvas#setItalic
     * @param {boolean} i - Indicates italic (`true`) or normal (`false`)
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20026,7 +20302,7 @@
     * Set the new font family.
     * @function module:svgcanvas.SvgCanvas#setFontFamily
     * @param {string} val - String with the new font family
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20042,7 +20318,7 @@
     * Set the new font color.
     * @function module:svgcanvas.SvgCanvas#setFontColor
     * @param {string} val - String with the new font color
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20072,7 +20348,7 @@
     * Applies the given font size to the selected element.
     * @function module:svgcanvas.SvgCanvas#setFontSize
     * @param {Float} val - Float with the new font size
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20103,7 +20379,7 @@
     * Updates the text element with the given string.
     * @function module:svgcanvas.SvgCanvas#setTextContent
     * @param {string} val - String with the new text
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20118,7 +20394,7 @@
     * @function module:svgcanvas.SvgCanvas#setImageURL
     * @param {string} val - String with the image URL/path
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20158,7 +20434,7 @@
     * Sets the new link URL for the selected anchor element.
     * @function module:svgcanvas.SvgCanvas#setLinkURL
     * @param {string} val - String with the link URL/path
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20199,7 +20475,7 @@
     * @function module:svgcanvas.SvgCanvas#setRectRadius
     * @param {string|Float} val - The new radius
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20224,7 +20500,7 @@
     * Wraps the selected element(s) in an anchor element or converts group to one.
     * @function module:svgcanvas.SvgCanvas#makeHyperlink
     * @param {string} url
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20234,7 +20510,7 @@
     };
     /**
     * @function module:svgcanvas.SvgCanvas#removeHyperlink
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20249,12 +20525,12 @@
     * Sets the new segment type to the selected segment(s).
     * @function module:svgcanvas.SvgCanvas#setSegType
     * @param {Integer} newType - New segment type. See {@link https://www.w3.org/TR/SVG/paths.html#InterfaceSVGPathSeg} for list
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
     this.setSegType = function (newType) {
-      pathActions$$1.setSegType(newType);
+      pathActions$1.setSegType(newType);
     };
     /**
     * Convert selected element to a path, or get the BBox of an element-as-path.
@@ -20262,12 +20538,12 @@
     * @todo (codedread): Remove the getBBox argument and split this function into two.
     * @param {Element} elem - The DOM element to be converted
     * @param {boolean} getBBox - Boolean on whether or not to only return the path's BBox
-    * @returns {undefined|DOMRect|false|SVGPathElement|null} If the getBBox flag is true, the resulting path's bounding box object.
+    * @returns {void|DOMRect|false|SVGPathElement|null} If the getBBox flag is true, the resulting path's bounding box object.
     * Otherwise the resulting path element is returned.
     */
 
 
-    this.convertToPath = function (elem, getBBox$$1) {
+    this.convertToPath = function (elem, getBBox) {
       if (isNullish(elem)) {
         var elems = selectedElements;
         $$9.each(elems, function (i, el) {
@@ -20278,8 +20554,8 @@
         return undefined;
       }
 
-      if (getBBox$$1) {
-        return getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions$$1);
+      if (getBBox) {
+        return getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions$1);
       } // TODO: Why is this applying attributes from curShape, then inside utilities.convertToPath it's pulling addition attributes from elem?
       // TODO: If convertToPath is called with one elem, curShape and elem are probably the same; but calling with multiple is a bug or cool feature.
 
@@ -20296,7 +20572,7 @@
         opacity: curShape.opacity,
         visibility: 'hidden'
       };
-      return convertToPath(elem, attrs, addSVGElementFromJson, pathActions$$1, clearSelection, addToSelection, hstry, addCommandToHistory);
+      return convertToPath(elem, attrs, addSVGElementFromJson, pathActions$1, clearSelection, addToSelection, hstry, addCommandToHistory);
     };
     /**
     * This function makes the changes to the elements. It does not add the change
@@ -20304,14 +20580,14 @@
     * @param {string} attr - Attribute name
     * @param {string|Float} newValue - String or number with the new attribute value
     * @param {Element[]} elems - The DOM elements to apply the change to
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
     var changeSelectedAttributeNoUndo = function changeSelectedAttributeNoUndo(attr, newValue, elems) {
       if (currentMode === 'pathedit') {
         // Editing node
-        pathActions$$1.moveNode(attr, newValue);
+        pathActions$1.moveNode(attr, newValue);
       }
 
       elems = elems || selectedElements;
@@ -20451,7 +20727,7 @@
     * @param {string} attr - String with the attribute name
     * @param {string|Float} val - String or number with the new attribute value
     * @param {Element[]} elems - The DOM elements to apply the change to
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20471,7 +20747,7 @@
     * history stack.
     * @function module:svgcanvas.SvgCanvas#deleteSelectedElements
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20520,7 +20796,7 @@
     * Removes all selected elements from the DOM and adds the change to the
     * history stack. Remembers removed elements on the clipboard.
     * @function module:svgcanvas.SvgCanvas#cutSelectedElements
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20531,7 +20807,7 @@
     /**
     * Remembers the current selected elements on the clipboard.
     * @function module:svgcanvas.SvgCanvas#copySelectedElements
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20543,12 +20819,12 @@
     };
     /**
     * @function module:svgcanvas.SvgCanvas#pasteElements
-    * @param {"in_place"|"point"|undefined} type
-    * @param {Integer|undefined} x Expected if type is "point"
-    * @param {Integer|undefined} y Expected if type is "point"
+    * @param {"in_place"|"point"|void} type
+    * @param {Integer|void} x Expected if type is "point"
+    * @param {Integer|void} y Expected if type is "point"
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @fires module:svgcanvas.SvgCanvas#event:ext-IDsUpdated
-    * @returns {undefined}
+    * @fires module:svgcanvas.SvgCanvas#event:ext_IDsUpdated
+    * @returns {void}
     */
 
 
@@ -20564,7 +20840,7 @@
       var batchCmd = new BatchCommand$1('Paste elements'); // const drawing = getCurrentDrawing();
 
       /**
-      * @typedef {PlainObject.<string, string>} module:svgcanvas.ChangedIDs
+      * @typedef {PlainObject<string, string>} module:svgcanvas.ChangedIDs
       */
 
       /**
@@ -20576,7 +20852,7 @@
       /**
        *
        * @param {module:svgcanvas.SVGAsJSON} elem
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function checkIDs(elem) {
@@ -20592,14 +20868,14 @@
 
       /**
       * Triggered when `pasteElements` is called from a paste action (context menu or key)
-      * @event module:svgcanvas.SvgCanvas#event:ext-IDsUpdated
+      * @event module:svgcanvas.SvgCanvas#event:ext_IDsUpdated
       * @type {PlainObject}
       * @property {module:svgcanvas.SVGAsJSON[]} elems
       * @property {module:svgcanvas.ChangedIDs} changes Maps past ID (on attribute) to current ID
       */
 
       runExtensions('IDsUpdated',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-IDsUpdated} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_IDsUpdated} */
       {
         elems: clipb,
         changes: changedIDs
@@ -20659,7 +20935,7 @@
     * @function module:svgcanvas.SvgCanvas#groupSelectedElements
     * @param {"a"|"g"} [type="g"] - type of element to group into, defaults to `<g>`
     * @param {string} [urlArg]
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -20734,7 +21010,7 @@
     * @function module:svgcanvas.SvgCanvas#pushGroupProperties
     * @param {SVGAElement|SVGGElement} g
     * @param {boolean} undoable
-    * @returns {BatchCommand|undefined}
+    * @returns {BatchCommand|void}
     */
 
 
@@ -20925,7 +21201,7 @@
     * Unwraps all the elements in a selected group (`g`) element. This requires
     * significant recalculations to apply group's transforms, etc. to its children.
     * @function module:svgcanvas.SvgCanvas#ungroupSelectedElement
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -21007,14 +21283,14 @@
     * other elements.
     * @function module:svgcanvas.SvgCanvas#moveToTopSelectedElement
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
     this.moveToTopSelectedElement = function () {
-      var _selectedElements = selectedElements,
-          _selectedElements2 = _slicedToArray(_selectedElements, 1),
-          selected = _selectedElements2[0];
+      var _selectedElements2 = selectedElements,
+          _selectedElements3 = _slicedToArray(_selectedElements2, 1),
+          selected = _selectedElements3[0];
 
       if (!isNullish(selected)) {
         var t = selected;
@@ -21034,14 +21310,14 @@
     * other elements.
     * @function module:svgcanvas.SvgCanvas#moveToBottomSelectedElement
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
     this.moveToBottomSelectedElement = function () {
-      var _selectedElements3 = selectedElements,
-          _selectedElements4 = _slicedToArray(_selectedElements3, 1),
-          selected = _selectedElements4[0];
+      var _selectedElements4 = selectedElements,
+          _selectedElements5 = _slicedToArray(_selectedElements4, 1),
+          selected = _selectedElements5[0];
 
       if (!isNullish(selected)) {
         var t = selected;
@@ -21074,7 +21350,7 @@
     * @function module:svgcanvas.SvgCanvas#moveUpDownSelected
     * @param {"Up"|"Down"} dir - String that's either 'Up' or 'Down'
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -21130,7 +21406,7 @@
     * @param {Float} dy - Float with the distance to move on the y-axis
     * @param {boolean} undoable - Boolean indicating whether or not the action should be undoable
     * @fires module:svgcanvas.SvgCanvas#event:changed
-    * @returns {BatchCommand|undefined} Batch command for the move
+    * @returns {BatchCommand|void} Batch command for the move
     */
 
 
@@ -21206,7 +21482,7 @@
     * @function module:svgcanvas.SvgCanvas#cloneSelectedElements
     * @param {Float} x Float with the distance to move on the x-axis
     * @param {Float} y Float with the distance to move on the y-axis
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -21263,7 +21539,7 @@
     * @function module:svgcanvas.SvgCanvas#alignSelectedElements
     * @param {string} type - String with single character indicating the alignment type
     * @param {"selected"|"largest"|"smallest"|"page"} relativeTo
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -21426,7 +21702,7 @@
     * @function module:svgcanvas.SvgCanvas#updateCanvas
     * @param {Float} w - Float with the new width
     * @param {Float} h - Float with the new height
-    * @fires module:svgcanvas.SvgCanvas#event:ext-canvasUpdated
+    * @fires module:svgcanvas.SvgCanvas#event:ext_canvasUpdated
     * @returns {module:svgcanvas.CanvasInfo}
     */
 
@@ -21463,7 +21739,7 @@
       selectorManager.selectorParentGroup.setAttribute('transform', 'translate(' + x + ',' + y + ')');
       /**
       * Invoked upon updates to the canvas.
-      * @event module:svgcanvas.SvgCanvas#event:ext-canvasUpdated
+      * @event module:svgcanvas.SvgCanvas#event:ext_canvasUpdated
       * @type {PlainObject}
       * @property {Integer} new_x
       * @property {Integer} new_y
@@ -21475,7 +21751,7 @@
 
       runExtensions('canvasUpdated',
       /**
-       * @type {module:svgcanvas.SvgCanvas#event:ext-canvasUpdated}
+       * @type {module:svgcanvas.SvgCanvas#event:ext_canvasUpdated}
        */
       {
         new_x: x,
@@ -21499,7 +21775,7 @@
     * @function module:svgcanvas.SvgCanvas#setBackground
     * @param {string} color - String with fill color to apply
     * @param {string} url - URL or path to image to use
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -21532,7 +21808,7 @@
     * @function module:svgcanvas.SvgCanvas#cycleElement
     * @param {boolean} next - true = next and false = previous element
     * @fires module:svgcanvas.SvgCanvas#event:selected
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -22207,33 +22483,32 @@
    * @license MIT
    * @copyright (c) 2009 Alexis Deveria
    * {@link http://a.deveria.com}
-   * @example usage #1:
-
-  $(function() {
+   * @example
+  $(function () {
     $.svgIcons('my_icon_set.svg'); // The SVG file that contains all icons
     // No options have been set, so all icons will automatically be inserted
     // into HTML elements that match the same IDs.
   });
 
-  * @example usage #2:
-
-  $(function() {
-    $.svgIcons('my_icon_set.svg', { // The SVG file that contains all icons
+  * @example
+  $(function () {
+    // The SVG file that contains all icons
+    $.svgIcons('my_icon_set.svg', {
       callback (icons) { // Custom callback function that sets click
                     // events for each icon
-        $.each(icons, function(id, icon) {
-          icon.click(function() {
+        $.each(icons, function (id, icon) {
+          icon.click(function () {
             alert('You clicked on the icon with id ' + id);
           });
         });
       }
-    }); //The SVG file that contains all icons
+    });
   });
 
-  * @example usage #3:
-
-  $(function() {
-    $.svgIcons('my_icon_set.svgz', { // The SVGZ file that contains all icons
+  * @example
+  $(function () {
+    // The SVGZ file that contains all icons
+    $.svgIcons('my_icon_set.svgz', {
       w: 32,  // All icons will be 32px wide
       h: 32,  // All icons will be 32px high
       fallback_path: 'icons/',  // All fallback files can be found here
@@ -22243,25 +22518,83 @@
         '#close_icon': 'close.png',
         '#save_icon': 'save.png'
       },
-      placement: {'.open_icon','open'}, // The "open" icon will be added
+      placement: {'.open_icon': 'open'}, // The "open" icon will be added
                       // to all elements with class "open_icon"
-      resize () {
+      resize: {
         '#save_icon .svg_icon': 64  // The "save" icon will be resized to 64 x 64px
       },
 
       callback (icons) { // Sets background color for "close" icon
-        icons['close'].css('background','red');
+        icons.close.css('background', 'red');
       },
 
       svgz: true // Indicates that an SVGZ file is being used
-
-    })
+    });
   });
   */
 
+  var isOpera$1 = Boolean(window.opera);
+
+  var fixIDs = function fixIDs(svgEl, svgNum, force) {
+    var defs = svgEl.find('defs');
+    if (!defs.length) return svgEl;
+    var idElems;
+
+    if (isOpera$1) {
+      idElems = defs.find('*').filter(function () {
+        return Boolean(this.id);
+      });
+    } else {
+      idElems = defs.find('[id]');
+    }
+
+    var allElems = svgEl[0].getElementsByTagName('*'),
+        len = allElems.length;
+    idElems.each(function (i) {
+      var id = this.id;
+      /*
+      const noDupes = ($(svgdoc).find('#' + id).length <= 1);
+      if (isOpera) noDupes = false; // Opera didn't clone svgEl, so not reliable
+      if(!force && noDupes) return;
+      */
+
+      var newId = 'x' + id + svgNum + i;
+      this.id = newId;
+      var oldVal = 'url(#' + id + ')';
+      var newVal = 'url(#' + newId + ')'; // Selector method, possibly faster but fails in Opera / jQuery 1.4.3
+      //  svgEl.find('[fill="url(#' + id + ')"]').each(function() {
+      //    this.setAttribute('fill', 'url(#' + newId + ')');
+      //  }).end().find('[stroke="url(#' + id + ')"]').each(function() {
+      //    this.setAttribute('stroke', 'url(#' + newId + ')');
+      //  }).end().find('use').each(function() {
+      //    if(this.getAttribute('xlink:href') == '#' + id) {
+      //      this.setAttributeNS(xlinkns,'href','#' + newId);
+      //    }
+      //  }).end().find('[filter="url(#' + id + ')"]').each(function() {
+      //    this.setAttribute('filter', 'url(#' + newId + ')');
+      //  });
+
+      for (i = 0; i < len; i++) {
+        var elem = allElems[i];
+
+        if (elem.getAttribute('fill') === oldVal) {
+          elem.setAttribute('fill', newVal);
+        }
+
+        if (elem.getAttribute('stroke') === oldVal) {
+          elem.setAttribute('stroke', newVal);
+        }
+
+        if (elem.getAttribute('filter') === oldVal) {
+          elem.setAttribute('filter', newVal);
+        }
+      }
+    });
+    return svgEl;
+  };
   /**
   * @callback module:jQuerySVGIcons.SVGIconsLoadedCallback
-  * @param {PlainObject.<string, external:jQuery>} svgIcons IDs keyed to jQuery objects of images
+  * @param {PlainObject<string, external:jQuery>} svgIcons IDs keyed to jQuery objects of images
   */
 
   /**
@@ -22270,13 +22603,19 @@
    * @returns {external:jQuery} The enhanced jQuery object
   */
 
+
   function jQueryPluginSVGIcons($) {
     var svgIcons = {};
-    var fixIDs;
     /**
-     * List of raster images with each
-     * key being the SVG icon ID to replace, and the value the image file name
-     * @typedef {PlainObject.<string, string>} external:jQuery.svgIcons.Fallback
+     * Map of raster images with each key being the SVG icon ID
+     *   to replace, and the value the image file name
+     * @typedef {PlainObject<string, string>} external:jQuery.svgIcons.Fallback
+    */
+
+    /**
+     * Map of raster images with each key being the SVG icon ID
+     *   whose `alt` will be set, and the value being the `alt` text
+     * @typedef {PlainObject<string, string>} external:jQuery.svgIcons.Alts
     */
 
     /**
@@ -22287,22 +22626,30 @@
     * @param {Float} [opts.h] The icon heights
     * @param {external:jQuery.svgIcons.Fallback} [opts.fallback]
     * @param {string} [opts.fallback_path] The path to use for all images
-      listed under "fallback"
-    * @param {boolean} [opts.replace] If set to `true`, HTML elements will be replaced by,
-      rather than include the SVG icon.
-    * @param {PlainObject.<string, string>} [opts.placement] List with selectors for keys and SVG icon ids
-      as values. This provides a custom method of adding icons.
-    * @param {PlainObject.<string, module:jQuerySVGIcons.Size>} [opts.resize] List with selectors for keys and numbers
-      as values. This allows an easy way to resize specific icons.
-    * @param {module:jQuerySVGIcons.SVGIconsLoadedCallback} [opts.callback] A function to call when all icons have been loaded.
-    * @param {boolean} [opts.id_match=true] Automatically attempt to match SVG icon ids with
-      corresponding HTML id
-    * @param {boolean} [opts.no_img] Prevent attempting to convert the icon into an `<img>`
-      element (may be faster, help for browser consistency)
-    * @param {boolean} [opts.svgz] Indicate that the file is an SVGZ file, and thus not to
-      parse as XML. SVGZ files add compression benefits, but getting data from
-      them fails in Firefox 2 and older.
-    * @returns {undefined}
+    *   listed under "fallback"
+    * @param {boolean} [opts.replace] If set to `true`, HTML elements will
+    *   be replaced by, rather than include the SVG icon.
+    * @param {PlainObject<string, string>} [opts.placement] Map with selectors
+    *   for keys and SVG icon ids as values. This provides a custom method of
+    *   adding icons.
+    * @param {PlainObject<string, module:jQuerySVGIcons.Size>} [opts.resize] Map
+    *   with selectors for keys and numbers as values. This allows an easy way to
+    *   resize specific icons.
+    * @param {module:jQuerySVGIcons.SVGIconsLoadedCallback} [opts.callback] A
+    *   function to call when all icons have been loaded.
+    * @param {boolean} [opts.id_match=true] Automatically attempt to match
+    *   SVG icon ids with corresponding HTML id
+    * @param {boolean} [opts.no_img] Prevent attempting to convert the icon
+    *   into an `<img>` element (may be faster, help for browser consistency)
+    * @param {boolean} [opts.svgz] Indicate that the file is an SVGZ file, and
+    *   thus not to parse as XML. SVGZ files add compression benefits, but
+    *   getting data from them fails in Firefox 2 and older.
+    * @param {jQuery.svgIcons.Alts} [opts.alts] Map of images with each key
+    *   being the SVG icon ID whose `alt` will be set, and the value being
+    *   the `alt` text
+    * @param {string} [opts.testIconAlt="icon"] Alt text for the injected test image.
+    *   In case wish to ensure have one for accessibility
+    * @returns {void}
     */
 
     $.svgIcons = function (file) {
@@ -22317,8 +22664,7 @@
           iconsMade = false,
           dataLoaded = false,
           loadAttempts = 0;
-      var isOpera = Boolean(window.opera),
-          // ua = navigator.userAgent,
+      var // ua = navigator.userAgent,
       // isSafari = (ua.includes('Safari/') && !ua.includes('Chrome/')),
       dataPre = 'data:image/svg+xml;charset=utf-8;base64,';
       var dataEl;
@@ -22373,9 +22719,9 @@
       }
       /**
        *
-       * @param {"ajax"|0|undefined} evt
+       * @param {"ajax"|0|void} evt
        * @param {boolean} [noWait]
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -22412,7 +22758,8 @@
           testImg = $(new Image()).attr({
             src: testSrc,
             width: 0,
-            height: 0
+            height: 0,
+            alt: opts.testIconAlt || 'icon'
           }).appendTo('body').load(function () {
             // Safari 4 crashes, Opera and Chrome don't
             makeIcons(true);
@@ -22430,24 +22777,35 @@
        * @param {external:jQuery} target
        * @param {external:jQuery} icon A wrapped `defs` or Image
        * @param {string} id SVG icon ID
-       * @param {string} setID
-       * @returns {undefined}
+       * @param {boolean} setID Whether to set the ID attribute (with `id`)
+       * @returns {void}
        */
 
 
       function setIcon(target, icon, id, setID) {
-        if (isOpera) icon.css('visibility', 'hidden');
+        if (isOpera$1) icon.css('visibility', 'hidden');
 
         if (opts.replace) {
           if (setID) icon.attr('id', id);
           var cl = target.attr('class');
           if (cl) icon.attr('class', 'svg_icon ' + cl);
+
+          if (!target.alt) {
+            var alt = 'icon';
+
+            if (opts.alts) {
+              alt = opts.alts[id] || alt;
+            }
+
+            icon.attr('alt', alt);
+          }
+
           target.replaceWith(icon);
         } else {
           target.append(icon);
         }
 
-        if (isOpera) {
+        if (isOpera$1) {
           setTimeout(function () {
             icon.removeAttr('style');
           }, 1);
@@ -22458,7 +22816,7 @@
       /**
        * @param {external:jQuery} icon A wrapped `defs` or Image
        * @param {string} id SVG icon ID
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function addIcon(icon, id) {
@@ -22472,7 +22830,7 @@
        *
        * @param {boolean} [toImage]
        * @param {external:jQuery.svgIcons.Fallback} [fallback]
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -22492,12 +22850,18 @@
           var path = opts.fallback_path || '';
           $.each(fallback, function (id, imgsrc) {
             holder = $('#' + id);
+            var alt = 'icon';
+
+            if (opts.alts) {
+              alt = opts.alts[id] || alt;
+            }
+
             var icon = $(new Image()).attr({
-              class: 'svg_icon',
+              "class": 'svg_icon',
               src: path + imgsrc,
               width: iconW,
               height: iconH,
-              alt: 'icon'
+              alt: alt
             });
             addIcon(icon, id);
           });
@@ -22533,16 +22897,23 @@
             svgroot.setAttribute('class', 'svg_icon'); // Without cloning, Firefox will make another GET request.
             // With cloning, causes issue in Opera/Win/Non-EN
 
-            if (!isOpera) svg = svg.cloneNode(true);
+            if (!isOpera$1) svg = svg.cloneNode(true);
             svgroot.append(svg);
             var icon = void 0;
 
             if (toImage) {
               tempHolder.empty().append(svgroot);
               var str = dataPre + encode64(unescape(encodeURIComponent(new XMLSerializer().serializeToString(svgroot))));
+              var alt = 'icon';
+
+              if (opts.alts) {
+                alt = opts.alts[id] || alt;
+              }
+
               icon = $(new Image()).attr({
-                class: 'svg_icon',
-                src: str
+                "class": 'svg_icon',
+                src: str,
+                alt: alt
               });
             } else {
               icon = fixIDs($(svgroot), i);
@@ -22557,7 +22928,7 @@
             if (!svgIcons[id]) return;
             $(sel).each(function (i) {
               var copy = svgIcons[id].clone();
-              if (i > 0 && !toImage) copy = fixIDs(copy, i, true);
+              if (i > 0 && !toImage) copy = fixIDs(copy, i);
               setIcon($(this), copy, id);
             });
           });
@@ -22573,66 +22944,8 @@
         iconsMade = true;
         if (opts.callback) opts.callback(svgIcons);
       }
-
-      fixIDs = function fixIDs(svgEl, svgNum, force) {
-        var defs = svgEl.find('defs');
-        if (!defs.length) return svgEl;
-        var idElems;
-
-        if (isOpera) {
-          idElems = defs.find('*').filter(function () {
-            return Boolean(this.id);
-          });
-        } else {
-          idElems = defs.find('[id]');
-        }
-
-        var allElems = svgEl[0].getElementsByTagName('*'),
-            len = allElems.length;
-        idElems.each(function (i) {
-          var id = this.id;
-          /*
-          const noDupes = ($(svgdoc).find('#' + id).length <= 1);
-          if (isOpera) noDupes = false; // Opera didn't clone svgEl, so not reliable
-          if(!force && noDupes) return;
-          */
-
-          var newId = 'x' + id + svgNum + i;
-          this.id = newId;
-          var oldVal = 'url(#' + id + ')';
-          var newVal = 'url(#' + newId + ')'; // Selector method, possibly faster but fails in Opera / jQuery 1.4.3
-          //  svgEl.find('[fill="url(#' + id + ')"]').each(function() {
-          //    this.setAttribute('fill', 'url(#' + newId + ')');
-          //  }).end().find('[stroke="url(#' + id + ')"]').each(function() {
-          //    this.setAttribute('stroke', 'url(#' + newId + ')');
-          //  }).end().find('use').each(function() {
-          //    if(this.getAttribute('xlink:href') == '#' + id) {
-          //      this.setAttributeNS(xlinkns,'href','#' + newId);
-          //    }
-          //  }).end().find('[filter="url(#' + id + ')"]').each(function() {
-          //    this.setAttribute('filter', 'url(#' + newId + ')');
-          //  });
-
-          for (i = 0; i < len; i++) {
-            var elem = allElems[i];
-
-            if (elem.getAttribute('fill') === oldVal) {
-              elem.setAttribute('fill', newVal);
-            }
-
-            if (elem.getAttribute('stroke') === oldVal) {
-              elem.setAttribute('stroke', newVal);
-            }
-
-            if (elem.getAttribute('filter') === oldVal) {
-              elem.setAttribute('filter', newVal);
-            }
-          }
-        });
-        return svgEl;
-      };
       /**
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -22662,7 +22975,7 @@
       var icon = svgIcons[id];
 
       if (uniqueClone && icon) {
-        icon = fixIDs(icon, 0, true).clone(true);
+        icon = fixIDs(icon, 0).clone(true);
       }
 
       return icon;
@@ -22675,14 +22988,16 @@
     */
 
     /**
-    * If a Float is used, it will represent width and height. Arrays contain the width and height.
+    * If a Float is used, it will represent width and height. Arrays contain
+    *   the width and height.
     * @typedef {module:jQuerySVGIcons.Dimensions|Float} module:jQuerySVGIcons.Size
     */
 
     /**
     * @function external:jQuery.resizeSvgIcons
-    * @param {PlainObject.<string, module:jQuerySVGIcons.Size>} obj Object with selectors as keys. The values are sizes.
-    * @returns {undefined}
+    * @param {PlainObject<string, module:jQuerySVGIcons.Size>} obj Object with
+    *   selectors as keys. The values are sizes.
+    * @returns {void}
     */
 
 
@@ -22724,13 +23039,12 @@
    * @license Apache-2.0
    * @example
    * // The Paint object is described below.
-   * $.jGraduate.Paint() // constructs a 'none' color
-   * @example $.jGraduate.Paint({copy: o}) // creates a copy of the paint o
-   * @example $.jGraduate.Paint({hex: '#rrggbb'}) // creates a solid color paint with hex = "#rrggbb"
-   * @example $.jGraduate.Paint({linearGradient: o, a: 50}) // creates a linear gradient paint with opacity=0.5
-   * @example $.jGraduate.Paint({radialGradient: o, a: 7}) // creates a radial gradient paint with opacity=0.07
-   * @example $.jGraduate.Paint({hex: '#rrggbb', linearGradient: o}) // throws an exception?
-   *
+   * $.jGraduate.Paint(); // constructs a 'none' color
+   * @example $.jGraduate.Paint({copy: o}); // creates a copy of the paint o
+   * @example $.jGraduate.Paint({hex: '#rrggbb'}); // creates a solid color paint with hex = "#rrggbb"
+   * @example $.jGraduate.Paint({linearGradient: o, a: 50}); // creates a linear gradient paint with opacity=0.5
+   * @example $.jGraduate.Paint({radialGradient: o, a: 7}); // creates a radial gradient paint with opacity=0.07
+   * @example $.jGraduate.Paint({hex: '#rrggbb', linearGradient: o}); // throws an exception?
   */
 
   /**
@@ -22936,13 +23250,13 @@
     };
     var isGecko = navigator.userAgent.includes('Gecko/');
     /**
-    * @typedef {PlainObject.<string, string>} module:jGraduate.Attrs
+    * @typedef {PlainObject<string, string>} module:jGraduate.Attrs
     */
 
     /**
     * @param {SVGElement} elem
     * @param {module:jGraduate.Attrs} attrs
-    * @returns {undefined}
+    * @returns {void}
     */
 
     function setAttrs(elem, attrs) {
@@ -23007,12 +23321,12 @@
     /**
     * @callback external:jQuery.fn.jGraduate.OkCallback
     * @param {external:jQuery.jGraduate.Paint} paint
-    * @returns {undefined}
+    * @returns {void}
     */
 
     /**
     * @callback external:jQuery.fn.jGraduate.CancelCallback
-    * @returns {undefined}
+    * @returns {void}
     */
 
     /**
@@ -23061,8 +23375,8 @@
           $this.hide();
         };
 
-        $.extend(true, $this, {
-          // public properties, methods, and callbacks
+        $.extend(true, $this, // public properties, methods, and callbacks
+        {
           // make a copy of the incoming paint
           paint: new $.jGraduate.Paint({
             copy: $settings.paint
@@ -23207,7 +23521,7 @@
         }, svg); // stop visuals created here
 
         var beginCoord = $('<div/>').attr({
-          class: 'grad_coord jGraduate_lg_field',
+          "class": 'grad_coord jGraduate_lg_field',
           title: 'Begin Stop'
         }).text(1).css({
           top: y1 * MAX,
@@ -23218,7 +23532,7 @@
           left: x2 * MAX
         }).attr('title', 'End stop').data('coord', 'end').appendTo(container);
         var centerCoord = $('<div/>').attr({
-          class: 'grad_coord jGraduate_rg_field',
+          "class": 'grad_coord jGraduate_rg_field',
           title: 'Center stop'
         }).text('C').css({
           top: cy * MAX,
@@ -23387,7 +23701,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -23411,14 +23725,13 @@
 
         /**
         * @param {Element} item
-        * @returns {undefined}
+        * @returns {void}
         */
 
         function selectStop(item) {
           if (curStop) curStop.setAttribute('stroke', '#000');
           item.setAttribute('stroke', 'blue');
-          curStop = item;
-          curStop.parentNode.append(curStop); //   stops = $('stop');
+          curStop = item; //   stops = $('stop');
           //   opac_select.val(curStop.attr('fill-opacity') || 1);
           //   root.append(delStop);
         }
@@ -23426,7 +23739,7 @@
         var stopOffset;
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
         function remDrags() {
@@ -23446,7 +23759,7 @@
         var cY = cy;
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
         function xform() {
@@ -23462,7 +23775,7 @@
         }
         /**
         * @param {Event} evt
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -24050,7 +24363,6 @@
    * | v1.9 | 20 May 2018 | Brett Zamir | Avoid SVGEdit dependency via `stateObj` config;<br />convert to ES6 module |
    * @module jQuerySpinButton
    * @example
-
     // Create group of settings to initialise spinbutton(s). (Optional)
     const myOptions = {
       min: 0, // Set lower limit.
@@ -24065,7 +24377,7 @@
 
     $(function () {
       // Initialise INPUT element(s) as SpinButtons: (passing options if desired)
-      $("#myInputElement").SpinButton(myOptions);
+      $('#myInputElement').SpinButton(myOptions);
     });
    */
 
@@ -24094,7 +24406,7 @@
     /**
     * @callback module:jQuerySpinButton.ValueCallback
     * @param {external:jQuery.fn.SpinButton} thisArg Spin Button; check its `value` to see how it was changed.
-    * @returns {undefined}
+    * @returns {void}
     */
 
     /**
@@ -24573,7 +24885,7 @@
       /**
       * Disable context menu items on the fly.
       * @memberof external:jQuery.fn
-      * @param {undefined|string} o Comma-separated
+      * @param {void|string} o Comma-separated
       * @returns {external:jQuery}
       */
       disableContextMenuItems: function disableContextMenuItems(o) {
@@ -24586,9 +24898,28 @@
         $(this).each(function () {
           if (o !== undefined) {
             var d = o.split(',');
+            var _iteratorNormalCompletion = true;
+            var _didIteratorError = false;
+            var _iteratorError = undefined;
 
-            for (var i = 0; i < d.length; i++) {
-              $(this).find('A[href="' + d[i] + '"]').parent().addClass('disabled');
+            try {
+              for (var _iterator = d[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+                var href = _step.value;
+                $(this).find('A[href="' + href + '"]').parent().addClass('disabled');
+              }
+            } catch (err) {
+              _didIteratorError = true;
+              _iteratorError = err;
+            } finally {
+              try {
+                if (!_iteratorNormalCompletion && _iterator["return"] != null) {
+                  _iterator["return"]();
+                }
+              } finally {
+                if (_didIteratorError) {
+                  throw _iteratorError;
+                }
+              }
             }
           }
         });
@@ -24598,7 +24929,7 @@
       /**
       * Enable context menu items on the fly.
       * @memberof external:jQuery.fn
-      * @param {undefined|string} o Comma-separated
+      * @param {void|string} o Comma-separated
       * @returns {external:jQuery}
       */
       enableContextMenuItems: function enableContextMenuItems(o) {
@@ -24611,9 +24942,28 @@
         $(this).each(function () {
           if (o !== undefined) {
             var d = o.split(',');
+            var _iteratorNormalCompletion2 = true;
+            var _didIteratorError2 = false;
+            var _iteratorError2 = undefined;
 
-            for (var i = 0; i < d.length; i++) {
-              $(this).find('A[href="' + d[i] + '"]').parent().removeClass('disabled');
+            try {
+              for (var _iterator2 = d[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+                var href = _step2.value;
+                $(this).find('A[href="' + href + '"]').parent().removeClass('disabled');
+              }
+            } catch (err) {
+              _didIteratorError2 = true;
+              _iteratorError2 = err;
+            } finally {
+              try {
+                if (!_iteratorNormalCompletion2 && _iterator2["return"] != null) {
+                  _iterator2["return"]();
+                }
+              } finally {
+                if (_didIteratorError2) {
+                  throw _iteratorError2;
+                }
+              }
             }
           }
         });
@@ -24661,6 +25011,8 @@
     return $;
   }
 
+  /* eslint-disable no-bitwise */
+
   /**
    * jPicker (Adapted from version 1.1.6)
    *
@@ -24694,7 +25046,7 @@
   }
   /**
    * Whether a value is `null` or `undefined`.
-   * @param {Any} val
+   * @param {any} val
    * @returns {boolean}
    */
 
@@ -24741,7 +25093,7 @@
     * @memberof module:jPicker
     * @param {external:jQuery} bar
     * @param {module:jPicker.SliderOptions} options
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -24752,7 +25104,7 @@
       /**
        * Fire events on the supplied `context`
        * @param {module:jPicker.JPickerInit} context
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function fireChangeEvents(context) {
@@ -24763,7 +25115,7 @@
       /**
        * Bind the mousedown to the bar not the arrow for quick snapping to the clicked location.
        * @param {external:jQuery.Event} e
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -24772,8 +25124,7 @@
         offset = {
           l: off.left | 0,
           t: off.top | 0
-        }; // eslint-disable-line no-bitwise
-
+        };
         clearTimeout(timeout); // using setTimeout for visual updates - once the style is updated the browser will re-render internally allowing the next Javascript to run
 
         timeout = setTimeout(function () {
@@ -24815,7 +25166,7 @@
       /**
        * Calculate mouse position and set value within the current range.
        * @param {Event} e
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -24835,7 +25186,7 @@
       }
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -24847,7 +25198,6 @@
         var arrowOffsetX = 0,
             arrowOffsetY = 0;
         setTimeout(function () {
-          /* eslint-disable no-bitwise */
           if (rangeX > 0) {
             // range is greater than zero
             // constrain to bounds
@@ -24870,7 +25220,6 @@
             left: arrowOffsetX + 'px',
             top: arrowOffsetY + 'px'
           });
-          /* eslint no-bitwise: ["error"] */
         });
       }
       /**
@@ -24878,7 +25227,7 @@
        * @param {?("xy"|"x"|"y")} name
        * @param {module:math.XYObject} value
        * @param {module:jPicker.Slider} context
-       * @returns {module:math.XYObject|Float|undefined}
+       * @returns {module:math.XYObject|Float|void}
        */
 
 
@@ -24968,7 +25317,7 @@
        *
        * @param {"minx"|"maxx"|"rangex"|"miny"|"maxy"|"rangey"|"all"} name
        * @param {module:jPicker.MinMaxRangeXY} value
-       * @returns {module:jPicker.MinMaxRangeXY|module:jPicker.MinMaxRangeX|module:jPicker.MinMaxRangeY|undefined}
+       * @returns {module:jPicker.MinMaxRangeXY|module:jPicker.MinMaxRangeX|module:jPicker.MinMaxRangeY|void}
        */
 
 
@@ -25021,7 +25370,6 @@
         var // changed = false,
         newMinX, newMaxX, newMinY, newMaxY;
         if (isNullish$1(name)) name = 'all';
-        /* eslint-disable no-bitwise */
 
         switch (name.toLowerCase()) {
           case 'minx':
@@ -25058,8 +25406,6 @@
             newMaxY = value && value.maxY && value.maxY | 0 || 0;
             break;
         }
-        /* eslint no-bitwise: ["error"] */
-
 
         if (!isNullish$1(newMinX) && minX !== newMinX) {
           minX = newMinX;
@@ -25085,7 +25431,7 @@
       }
       /**
       * @param {GenericCallback} callback
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25095,7 +25441,7 @@
       }
       /**
       * @param {GenericCallback} callback
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25110,7 +25456,7 @@
       }
       /**
       *
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25161,7 +25507,6 @@
      * @param {external:jQuery.jPicker.Color} color
      * @param {external:jQuery.fn.$.fn.jPicker} bindedHex
      * @param {Float} alphaPrecision
-     * @constructor
      */
 
 
@@ -25175,7 +25520,7 @@
       /**
        *
        * @param {Event} e
-       * @returns {Event|false|undefined}
+       * @returns {Event|false|void}
        */
 
       function keyDown(e) {
@@ -25294,7 +25639,7 @@
 
       /**
       * @param {Event} e
-      * @returns {Event|undefined}
+      * @returns {Event|void}
       * @todo Why is this returning an event?
       */
 
@@ -25362,7 +25707,7 @@
 
       /**
       * @param {Event} e
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25449,7 +25794,7 @@
       /**
       * @param {external:jQuery} ui
       * @param {Element} context
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25468,7 +25813,7 @@
       }
       /**
       * Unbind all events and null objects.
-      * @returns {undefined}
+      * @returns {void}
       */
 
 
@@ -25542,6 +25887,7 @@
       * @class
       * @memberof external:jQuery.jPicker
       * @param {module:jPicker.JPickerInit} init
+      * @returns {external:jQuery.jPicker.Color}
       */
       Color: function Color(init) {
         // eslint-disable-line object-shorthand
@@ -25549,7 +25895,7 @@
         /**
          *
          * @param {module:jPicker.Slider} context
-         * @returns {undefined}
+         * @returns {void}
          */
 
         function fireChangeEvents(context) {
@@ -25558,10 +25904,10 @@
           }
         }
         /**
-         * @param {string|"ahex"|"hex"|"all"|""|null|undefined} name String composed of letters "r", "g", "b", "a", "h", "s", and/or "v"
+         * @param {string|"ahex"|"hex"|"all"|""|null|void} name String composed of letters "r", "g", "b", "a", "h", "s", and/or "v"
          * @param {module:jPicker.RGBA|module:jPicker.JPickerInit|string} [value]
          * @param {external:jQuery.jPicker.Color} context
-         * @returns {module:jPicker.JPickerInit|string|null|undefined}
+         * @returns {module:jPicker.JPickerInit|string|null|void}
          */
 
 
@@ -25855,7 +26201,7 @@
         }
         /**
         * @param {GenericCallback} callback
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -25865,7 +26211,7 @@
         }
         /**
         * @param {GenericCallback} callback
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -25880,7 +26226,7 @@
         }
         /**
         * Unset `changeEvents`
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26159,21 +26505,21 @@
     * @callback module:jPicker.LiveCallback
     * @param {external:jQuery} ui
     * @param {Element} context
-    * @returns {undefined}
+    * @returns {void}
     */
 
     /**
     * @callback module:jPicker.CommitCallback
     * @param {external:jQuery.jPicker.Color} activeColor
     * @param {external:jQuery} okButton
-    * @returns {undefined} Return value not used.
+    * @returns {void} Return value not used.
     */
 
     /**
      * @callback module:jPicker.CancelCallback
      * @param {external:jQuery.jPicker.Color} activeColor
      * @param {external:jQuery} cancelButton
-     * @returns {undefined} Return value not used.
+     * @returns {void} Return value not used.
      */
 
     /**
@@ -26236,7 +26582,7 @@
          *
          * @param {"h"|"s"|"v"|"r"|"g"|"b"|"a"} colorMode
          * @throws {Error} Invalid mode
-         * @returns {undefined}
+         * @returns {void}
          */
 
         function setColorMode(colorMode) {
@@ -26481,7 +26827,7 @@
          * Update color when user changes text values.
          * @param {external:jQuery} ui
          * @param {?module:jPicker.Slider} context
-         * @returns {undefined}
+         * @returns {void}
         */
 
 
@@ -26497,7 +26843,7 @@
          * User has dragged the ColorMap pointer.
          * @param {external:jQuery} ui
          * @param {?module:jPicker.Slider} context
-         * @returns {undefined}
+         * @returns {void}
         */
 
 
@@ -26555,7 +26901,7 @@
          * User has dragged the ColorBar slider.
          * @param {external:jQuery} ui
          * @param {?module:jPicker.Slider} context
-         * @returns {undefined}
+         * @returns {void}
         */
 
 
@@ -26609,7 +26955,7 @@
          * Position map and bar arrows to match current color.
          * @param {external:jQuery} ui
          * @param {?module:jPicker.Slider} context
-         * @returns {undefined}
+         * @returns {void}
         */
 
 
@@ -26723,7 +27069,7 @@
         }
         /**
         * @param {external:jQuery} ui
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26738,7 +27084,7 @@
         }
         /**
         * @param {external:jQuery} ui
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26785,7 +27131,7 @@
         }
         /**
         * @param {external:jQuery} ui
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26866,7 +27212,7 @@
         /**
         * @param {external:jQuery} el
         * @param {string} [c="transparent"]
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26878,7 +27224,7 @@
         /**
         * @param {external:jQuery} img
         * @param {string} src The image source
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26896,7 +27242,7 @@
         /**
         * @param {external:jQuery} img
         * @param {Float} y
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26908,7 +27254,7 @@
         /**
         * @param {external:jQuery} obj
         * @param {Float} alpha
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26949,7 +27295,7 @@
         }
         /**
         * Revert color to original color when opened.
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26958,7 +27304,7 @@
         }
         /**
         * Commit the color changes.
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26967,7 +27313,7 @@
         }
         /**
         * @param {Event} e
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26977,7 +27323,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26986,7 +27332,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -26997,7 +27343,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27008,7 +27354,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27017,7 +27363,7 @@
         }
         /**
         * @param {external:jQuery} ui
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27030,7 +27376,7 @@
         }
         /**
         * @param {external:jQuery} ui
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27051,7 +27397,7 @@
         }
         /**
         * @param {Event} e
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27115,7 +27461,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27123,7 +27469,7 @@
           color.current.val('ahex', color.active.val('ahex'));
           /**
           *
-          * @returns {undefined}
+          * @returns {void}
           */
 
           function attachIFrame() {
@@ -27166,14 +27512,14 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
         function hide() {
           /**
           *
-          * @returns {undefined}
+          * @returns {void}
           */
           function removeIFrame() {
             if (settings.window.expandable) container.css({
@@ -27200,7 +27546,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27323,9 +27669,11 @@
 
             for (var i = 0; i < color.quickList.length; i++) {
               /* if default colors are hex strings, change them to color objects */
-              if (_typeof(color.quickList[i]).toString().toLowerCase() === 'string') color.quickList[i] = new Color({
-                hex: color.quickList[i]
-              });
+              if (_typeof(color.quickList[i]).toString().toLowerCase() === 'string') {
+                color.quickList[i] = new Color({
+                  hex: color.quickList[i]
+                });
+              }
 
               var _alpha = color.quickList[i].val('a');
 
@@ -27372,7 +27720,7 @@
         }
         /**
         *
-        * @returns {undefined}
+        * @returns {void}
         */
 
 
@@ -27419,6 +27767,7 @@
           for (var i = 0; i < List.length; i++) {
             if (List[i] === that) {
               List.splice(i, 1);
+              i--; // Decrement to ensure we don't miss next item (lgtm warning)
             }
           }
         }
@@ -27995,10 +28344,24 @@
   var $$a = jQuery;
   var langParam;
   /**
-  * @param {"content"|"title"} type
-  * @param {module:locale.LocaleSelectorValue} obj
-  * @param {boolean} ids
-  * @returns {undefined}
+   * Looks for elements to localize using the supplied `obj` to indicate
+   *   on which selectors (or IDs if `ids` is set to `true`) to set its
+   *   strings (with selectors relative to the editor root element). All
+   *   keys will be translated, but for each selector, only the first item
+   *   found matching will be modified.
+   * If the type is `content`, the selector-identified element's children
+   *   will be checked, and the first (non-empty) text (placeholder) node
+   *   found will have its text replaced.
+   * If the type is `title`, the element's `title`
+   *   property will be set.
+   * If the type is `aria-label`, the element's `aria-label` attribute
+   *   will be set (i.e., instructions for screen readers when there is
+   *   otherwise no visible text to be read for the function of the form
+   *   control).
+   * @param {"content"|"title"} type
+   * @param {module:locale.LocaleSelectorValue} obj Selectors or IDs keyed to strings
+   * @param {boolean} ids
+   * @returns {void}
   */
 
   var setStrings = function setStrings(type, obj, ids) {
@@ -28020,12 +28383,18 @@
       var $elem = parent.find(sel);
 
       if ($elem.length) {
-        var elem = parent.find(sel)[0];
+        var elem = $elem[0];
 
         switch (type) {
+          case 'aria-label':
+            elem.setAttribute('aria-label', val);
+            break;
+
           case 'content':
             _toConsumableArray(elem.childNodes).some(function (node) {
-              if (node.nodeType === 3 && node.textContent.trim()) {
+              if (node.nodeType === 3
+              /* Node.TEXT_NODE */
+              && node.textContent.trim()) {
                 node.textContent = val;
                 return true;
               }
@@ -28046,7 +28415,7 @@
   };
   /**
   * The "data" property is generally set to an an array of objects with
-  * "id" and "title" or "textContent" properties
+  *   "id" and "title" or "textContent" properties
   * @typedef {PlainObject} module:locale.AddLangExtensionLocaleData
   * @property {module:locale.LocaleStrings[]} data See {@tutorial LocaleDocs}
   */
@@ -28063,10 +28432,11 @@
 
   var editor_;
   /**
-  * @function init
-  * @memberof module:locale
-  * @param {module:locale.LocaleEditorInit} editor
-  * @returns {undefined}
+   * Sets the current editor instance (on which `addLangData`) exists.
+   * @function init
+   * @memberof module:locale
+   * @param {module:locale.LocaleEditorInit} editor
+   * @returns {void}
   */
 
   var init$7 = function init(editor) {
@@ -28081,8 +28451,8 @@
   /**
   * @function module:locale.readLang
   * @param {module:locale.LocaleStrings} langData See {@tutorial LocaleDocs}
-  * @fires module:svgcanvas.SvgCanvas#event:ext-addLangData
-  * @returns {Promise} Resolves to [`LangAndData`]{@link module:locale.LangAndData}
+  * @fires module:svgcanvas.SvgCanvas#event:ext_addLangData
+  * @returns {Promise<module:locale.LangAndData>} Resolves to [`LangAndData`]{@link module:locale.LangAndData}
   */
 
   var readLang =
@@ -28091,7 +28461,7 @@
     var _ref3 = _asyncToGenerator(
     /*#__PURE__*/
     regeneratorRuntime.mark(function _callee(langData) {
-      var more, _langData, tools, properties, config, layers, common, ui, opts;
+      var more, _langData, tools, properties, config, layers, common, ui, opts, ariaLabels;
 
       return regeneratorRuntime.wrap(function _callee$(_context) {
         while (1) {
@@ -28118,6 +28488,7 @@
             case 6:
               _langData = langData, tools = _langData.tools, properties = _langData.properties, config = _langData.config, layers = _langData.layers, common = _langData.common, ui = _langData.ui;
               setStrings('content', {
+                // Todo: Add this powered by (probably by default) but with config to remove
                 // copyrightLabel: misc.powered_by, // Currently commented out in svg-editor.html
                 curve_segments: properties.curve_segments,
                 fitToContent: tools.fitToContent,
@@ -28175,14 +28546,41 @@
               }, true); // Context menus
 
               opts = {};
-              $$a.each(['cut', 'copy', 'paste', 'paste_in_place', 'delete', 'group', 'ungroup', 'move_front', 'move_up', 'move_down', 'move_back'], function () {
-                opts['#cmenu_canvas a[href="#' + this + '"]'] = tools[this];
+              ['cut', 'copy', 'paste', 'paste_in_place', 'delete', 'group', 'ungroup', 'move_front', 'move_up', 'move_down', 'move_back'].forEach(function (item) {
+                opts['#cmenu_canvas a[href="#' + item + '"]'] = tools[item];
               });
-              $$a.each(['dupe', 'merge_down', 'merge_all'], function () {
-                opts['#cmenu_layers a[href="#' + this + '"]'] = layers[this];
+              ['dupe', 'merge_down', 'merge_all'].forEach(function (item) {
+                opts['#cmenu_layers a[href="#' + item + '"]'] = layers[item];
               });
               opts['#cmenu_layers a[href="#delete"]'] = layers.del;
               setStrings('content', opts);
+              ariaLabels = {};
+              Object.entries({
+                tool_blur: properties.blur,
+                tool_position: tools.align_to_page,
+                tool_font_family: properties.font_family,
+                zoom_panel: ui.zoom_level,
+                stroke_linejoin: properties.linejoin_miter,
+                stroke_linecap: properties.linecap_butt,
+                tool_opacity: properties.opacity
+              }).forEach(function (_ref4) {
+                var _ref5 = _slicedToArray(_ref4, 2),
+                    id = _ref5[0],
+                    value = _ref5[1];
+
+                ariaLabels['#' + id + ' button'] = value;
+              });
+              Object.entries({
+                group_opacity: properties.opacity,
+                zoom: ui.zoom_level
+              }).forEach(function (_ref6) {
+                var _ref7 = _slicedToArray(_ref6, 2),
+                    id = _ref7[0],
+                    value = _ref7[1];
+
+                ariaLabels['#' + id] = value;
+              });
+              setStrings('aria-label', ariaLabels);
               setStrings('title', {
                 align_relative_to: tools.align_relative_to,
                 circle_cx: properties.circle_cx,
@@ -28201,7 +28599,7 @@
                 image_width: properties.image_width,
                 layer_delete: layers.del,
                 layer_down: layers.move_down,
-                layer_new: layers.new,
+                layer_new: layers["new"],
                 layer_rename: layers.rename,
                 layer_moreopts: common.more_opts,
                 layer_up: layers.move_up,
@@ -28286,12 +28684,12 @@
                 langData: langData
               });
 
-            case 15:
+            case 19:
             case "end":
               return _context.stop();
           }
         }
-      }, _callee, this);
+      }, _callee);
     }));
 
     return function readLang(_x) {
@@ -28299,20 +28697,21 @@
     };
   }();
   /**
-  * @function module:locale.putLocale
-  * @param {string} givenParam
-  * @param {string[]} goodLangs
-  * @param {{langPath: string}} conf
-  * @fires module:svgcanvas.SvgCanvas#event:ext-addLangData
-  * @fires module:svgcanvas.SvgCanvas#event:ext-langReady
-  * @fires module:svgcanvas.SvgCanvas#event:ext-langChanged
-  * @returns {Promise} Resolves to result of {@link module:locale.readLang}
+   *
+   * @function module:locale.putLocale
+   * @param {string} givenParam
+   * @param {string[]} goodLangs
+   * @param {{langPath: string}} conf
+   * @fires module:svgcanvas.SvgCanvas#event:ext_addLangData
+   * @fires module:svgcanvas.SvgCanvas#event:ext_langReady
+   * @fires module:svgcanvas.SvgCanvas#event:ext_langChanged
+   * @returns {Promise<module:locale.LangAndData>} Resolves to result of {@link module:locale.readLang}
   */
 
   var putLocale =
   /*#__PURE__*/
   function () {
-    var _ref4 = _asyncToGenerator(
+    var _ref8 = _asyncToGenerator(
     /*#__PURE__*/
     regeneratorRuntime.mark(function _callee2(givenParam, goodLangs, conf) {
       var url;
@@ -28364,13 +28763,51 @@
               return _context2.stop();
           }
         }
-      }, _callee2, this);
+      }, _callee2);
     }));
 
     return function putLocale(_x2, _x3, _x4) {
-      return _ref4.apply(this, arguments);
+      return _ref8.apply(this, arguments);
     };
   }();
+
+  function _slicedToArray$1(arr, i) {
+    return _arrayWithHoles$1(arr) || _iterableToArrayLimit$1(arr, i) || _nonIterableRest$1();
+  }
+
+  function _arrayWithHoles$1(arr) {
+    if (Array.isArray(arr)) return arr;
+  }
+
+  function _iterableToArrayLimit$1(arr, i) {
+    var _arr = [];
+    var _n = true;
+    var _d = false;
+    var _e = undefined;
+
+    try {
+      for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+        _arr.push(_s.value);
+
+        if (i && _arr.length === i) break;
+      }
+    } catch (err) {
+      _d = true;
+      _e = err;
+    } finally {
+      try {
+        if (!_n && _i["return"] != null) _i["return"]();
+      } finally {
+        if (_d) throw _e;
+      }
+    }
+
+    return _arr;
+  }
+
+  function _nonIterableRest$1() {
+    throw new TypeError("Invalid attempt to destructure non-iterable instance");
+  }
 
   function loadStylesheets(stylesheets) {
     var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
@@ -28390,7 +28827,7 @@
       if (Array.isArray(stylesheetURL)) {
         var _stylesheetURL = stylesheetURL;
 
-        var _stylesheetURL2 = _slicedToArray(_stylesheetURL, 2);
+        var _stylesheetURL2 = _slicedToArray$1(_stylesheetURL, 2);
 
         stylesheetURL = _stylesheetURL2[0];
         var _stylesheetURL2$ = _stylesheetURL2[1];
@@ -28646,6 +29083,9 @@
   * @property {boolean} [noStorageOnLoad=false] Some interaction with `ext-storage.js`; prevent even the loading of previously saved local storage.
   * @property {boolean} [forceStorage=false] Some interaction with `ext-storage.js`; strongly discouraged from modification as it bypasses user privacy by preventing them from choosing whether to keep local storage or not (and may be required by law in some regions)
   * @property {boolean} [emptyStorageOnDecline=false] Used by `ext-storage.js`; empty any prior storage if the user declines to store
+  * @property {boolean} [avoidClientSide=false] DEPRECATED (use `avoidClientSideDownload` instead); Used by `ext-server_opensave.js`; set to `true` if you wish to always save to server and not only as fallback when client support is lacking
+  * @property {boolean} [avoidClientSideDownload=false] Used by `ext-server_opensave.js`; set to `true` if you wish to always save to server and not only as fallback when client support is lacking
+  * @property {boolean} [avoidClientSideOpen=false] Used by `ext-server_opensave.js`; set to `true` if you wish to always open from the server and not only as fallback when FileReader client support is lacking
   * @property {string[]} [extensions=module:SVGEditor~defaultExtensions] Extensions to load on startup. Use an array in `setConfig` and comma separated file names in the URL. Extension names must begin with "ext-". Note that as of version 2.7, paths containing "/", "\", or ":", are disallowed for security reasons. Although previous versions of this list would entirely override the default list, as of version 2.7, the defaults will always be added to this explicit list unless the configuration `noDefaultExtensions` is included.
   * @property {module:SVGEditor.Stylesheet[]} [stylesheets=["@default"]] An array of required stylesheets to load in parallel; include the value `"@default"` within this array to ensure all default stylesheets are loaded.
   * @property {string[]} [allowedOrigins=[]] Used by `ext-xdomain-messaging.js` to indicate which origins are permitted for cross-domain messaging (e.g., between the embedded editor and main editor code). Besides explicit domains, one might add '*' to allow all domains (not recommended for privacy/data integrity of your user's content!), `window.location.origin` for allowing the same origin (should be safe if you trust all apps on your domain), 'null' to allow `file:///` URL usage
@@ -28752,8 +29192,13 @@
     // Some interaction with ext-storage.js; prevent even the loading of previously saved local storage
     forceStorage: false,
     // Some interaction with ext-storage.js; strongly discouraged from modification as it bypasses user privacy by preventing them from choosing whether to keep local storage or not
-    emptyStorageOnDecline: false // Used by ext-storage.js; empty any prior storage if the user declines to store
-
+    emptyStorageOnDecline: false,
+    // Used by ext-storage.js; empty any prior storage if the user declines to store
+    // EXTENSION (CLIENT VS. SERVER SAVING/OPENING)
+    avoidClientSide: false,
+    // Deprecated in favor of `avoidClientSideDownload`
+    avoidClientSideDownload: false,
+    avoidClientSideOpen: false
   },
 
   /**
@@ -28799,7 +29244,7 @@
    * @param {PlainObject} [opts={}]
    * @param {boolean} [opts.noAlert]
    * @throws {Error} Upon failure to load SVG
-   * @returns {Promise} Resolves to undefined upon success (or if `noAlert` is
+   * @returns {Promise<void>} Resolves to undefined upon success (or if `noAlert` is
    *   falsey, though only until after the `alert` is closed); rejects if SVG
    *   loading fails and `noAlert` is truthy.
    */
@@ -28820,7 +29265,7 @@
     _loadSvgString = _asyncToGenerator(
     /*#__PURE__*/
     regeneratorRuntime.mark(function _callee23(str) {
-      var _ref45,
+      var _ref46,
           noAlert,
           success,
           _args23 = arguments;
@@ -28829,7 +29274,7 @@
         while (1) {
           switch (_context23.prev = _context23.next) {
             case 0:
-              _ref45 = _args23.length > 1 && _args23[1] !== undefined ? _args23[1] : {}, noAlert = _ref45.noAlert;
+              _ref46 = _args23.length > 1 && _args23[1] !== undefined ? _args23[1] : {}, noAlert = _ref46.noAlert;
               success = svgCanvas.setSvgString(str) !== false;
 
               if (!success) {
@@ -28859,7 +29304,7 @@
               return _context23.stop();
           }
         }
-      }, _callee23, this);
+      }, _callee23);
     }));
     return _loadSvgString.apply(this, arguments);
   }
@@ -28873,7 +29318,7 @@
      * @param {PlainObject} localeInfo
      * @param {string} [localeInfo.name] Defaults to `defaultName` of {@link module:SVGEditor~getImportLocale}
      * @param {string} [localeInfo.lang=defaultLang] Defaults to `defaultLang` of {@link module:SVGEditor~getImportLocale}
-     * @returns {Promise} Resolves to {@link module:locale.LocaleStrings}
+     * @returns {Promise<module:locale.LocaleStrings>} Resolves to {@link module:locale.LocaleStrings}
      */
     return (
       /*#__PURE__*/
@@ -28896,7 +29341,7 @@
                   importLocale = function _ref3(language) {
                     var url = "".concat(curConfig.extPath, "ext-locale/").concat(name, "/").concat(language, ".js");
                     return importSetGlobalDefault(url, {
-                      global: "svgEditorExtensionLocale_".concat(name, "_").concat(language)
+                      global: "svgEditorExtensionLocale_".concat(name, "_").concat(language.replace(/-/g, '_'))
                     });
                   };
 
@@ -28918,12 +29363,14 @@
                   return _context.stop();
               }
             }
-          }, _callee, this, [[2, 8]]);
+          }, _callee, null, [[2, 8]]);
         }));
 
-        return function importLocaleDefaulting() {
+        function importLocaleDefaulting() {
           return _importLocaleDefaulting.apply(this, arguments);
-        };
+        }
+
+        return importLocaleDefaulting;
       }()
     );
   }
@@ -28935,7 +29382,7 @@
   * Store and retrieve preferences.
   * @param {string} key The preference name to be retrieved or set
   * @param {string} [val] The value. If the value supplied is missing or falsey, no change to the preference will be made.
-  * @returns {string|undefined} If val is missing or falsey, the value of the previously stored preference will be returned.
+  * @returns {string|void} If val is missing or falsey, the value of the previously stored preference will be returned.
   * @todo Can we change setting on the jQuery namespace (onto editor) to avoid conflicts?
   * @todo Review whether any remaining existing direct references to
   *  getting `curPrefs` can be changed to use `$.pref()` getting to ensure
@@ -28982,7 +29429,7 @@
   *  change URL setting so that it always uses a different namespace,
   *  so it won't affect pre-existing user storage (but then if users saves
   *  that, it will then be subject to tampering
-  * @returns {undefined}
+  * @returns {void}
   */
 
   editor.loadContentAndPrefs = function () {
@@ -28993,8 +29440,9 @@
 
     if (editor.storage && ( // Cookies do not have enough available memory to hold large documents
     curConfig.forceStorage || !curConfig.noStorageOnLoad && document.cookie.match(/(?:^|;\s*)svgeditstore=prefsAndContent/))) {
-      var name = 'svgedit-' + curConfig.canvasName;
-      var cached = editor.storage.getItem(name);
+      var _name = 'svgedit-' + curConfig.canvasName;
+
+      var cached = editor.storage.getItem(_name);
 
       if (cached) {
         editor.loadFromString(cached);
@@ -29037,7 +29485,7 @@
   *  explicitly permits via `allowInitialUserOverride` but extension config
   *  can be overridden as they will run after URL settings). Should
   *   not be needed in `svgedit-config-iife.js`.
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
@@ -29047,8 +29495,8 @@
      *
      * @param {module:SVGEditor.Config|module:SVGEditor.Prefs} cfgObj
      * @param {string} key
-     * @param {Any} val See {@link module:SVGEditor.Config} or {@link module:SVGEditor.Prefs}
-     * @returns {undefined}
+     * @param {any} val See {@link module:SVGEditor.Config} or {@link module:SVGEditor.Prefs}
+     * @returns {void}
      */
 
     function extendOrAdd(cfgObj, key, val) {
@@ -29060,45 +29508,47 @@
     }
 
     $$b.each(opts, function (key, val) {
-      if ({}.hasOwnProperty.call(opts, key)) {
-        // Only allow prefs defined in defaultPrefs
-        if ({}.hasOwnProperty.call(defaultPrefs, key)) {
-          if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || {}.hasOwnProperty.call(curPrefs, key))) {
+      if (!{}.hasOwnProperty.call(opts, key)) {
+        return;
+      } // Only allow prefs defined in defaultPrefs
+
+
+      if ({}.hasOwnProperty.call(defaultPrefs, key)) {
+        if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || {}.hasOwnProperty.call(curPrefs, key))) {
+          return;
+        }
+
+        if (cfgCfg.allowInitialUserOverride === true) {
+          defaultPrefs[key] = val;
+        } else {
+          $$b.pref(key, val);
+        }
+      } else if (['extensions', 'stylesheets', 'allowedOrigins'].includes(key)) {
+        if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || ['allowedOrigins', 'stylesheets'].includes(key) || key === 'extensions' && curConfig.lockExtensions)) {
+          return;
+        }
+
+        curConfig[key] = curConfig[key].concat(val); // We will handle any dupes later
+        // Only allow other curConfig if defined in defaultConfig
+      } else if ({}.hasOwnProperty.call(defaultConfig, key)) {
+        if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || {}.hasOwnProperty.call(curConfig, key))) {
+          return;
+        } // Potentially overwriting of previously set config
+
+
+        if ({}.hasOwnProperty.call(curConfig, key)) {
+          if (cfgCfg.overwrite === false) {
             return;
           }
 
-          if (cfgCfg.allowInitialUserOverride === true) {
-            defaultPrefs[key] = val;
-          } else {
-            $$b.pref(key, val);
-          }
-        } else if (['extensions', 'stylesheets', 'allowedOrigins'].includes(key)) {
-          if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || ['allowedOrigins', 'stylesheets'].includes(key) || key === 'extensions' && curConfig.lockExtensions)) {
-            return;
-          }
-
-          curConfig[key] = curConfig[key].concat(val); // We will handle any dupes later
-          // Only allow other curConfig if defined in defaultConfig
-        } else if ({}.hasOwnProperty.call(defaultConfig, key)) {
-          if (cfgCfg.overwrite === false && (curConfig.preventAllURLConfig || {}.hasOwnProperty.call(curConfig, key))) {
-            return;
-          } // Potentially overwriting of previously set config
-
-
-          if ({}.hasOwnProperty.call(curConfig, key)) {
-            if (cfgCfg.overwrite === false) {
-              return;
-            }
-
-            extendOrAdd(curConfig, key, val);
-          } else if (cfgCfg.allowInitialUserOverride === true) {
-            extendOrAdd(defaultConfig, key, val);
-          } else if (defaultConfig[key] && _typeof(defaultConfig[key]) === 'object') {
-            curConfig[key] = {};
-            $$b.extend(true, curConfig[key], val); // Merge properties recursively, e.g., on initFill, initStroke objects
-          } else {
-            curConfig[key] = val;
-          }
+          extendOrAdd(curConfig, key, val);
+        } else if (cfgCfg.allowInitialUserOverride === true) {
+          extendOrAdd(defaultConfig, key, val);
+        } else if (defaultConfig[key] && _typeof(defaultConfig[key]) === 'object') {
+          curConfig[key] = Array.isArray(defaultConfig[key]) ? [] : {};
+          $$b.extend(true, curConfig[key], val); // Merge properties recursively, e.g., on initFill, initStroke objects
+        } else {
+          curConfig[key] = val;
         }
       }
     });
@@ -29123,7 +29573,7 @@
   *  - calls [svgCanvas.setSvgString()]{@link module:svgcanvas.SvgCanvas#setSvgString} with the string contents of that file.
   * Not passed any parameters.
   * @function module:SVGEditor.CustomHandler#open
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
@@ -29135,7 +29585,7 @@
   * @param {external:Window} win
   * @param {module:svgcanvas.SvgCanvas#event:saved} svgStr A string of the SVG
   * @listens module:svgcanvas.SvgCanvas#event:saved
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
@@ -29149,7 +29599,7 @@
   * @param {external:Window} win
   * @param {module:svgcanvas.SvgCanvas#event:exported} data
   * @listens module:svgcanvas.SvgCanvas#event:exported
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
@@ -29157,19 +29607,19 @@
   * @param {external:Window} win
   * @param {module:svgcanvas.SvgCanvas#event:exportedPDF} data
   * @listens module:svgcanvas.SvgCanvas#event:exportedPDF
-  * @returns {undefined}
+  * @returns {void}
   */
 
   /**
   * Allows one to override default SVGEdit `open`, `save`, and
   * `export` editor behaviors.
   * @param {module:SVGEditor.CustomHandler} opts Extension mechanisms may call `setCustomHandlers` with three functions: `opts.open`, `opts.save`, and `opts.exportImage`
-  * @returns {undefined}
+  * @returns {Promise<void>}
   */
 
 
   editor.setCustomHandlers = function (opts) {
-    editor.ready(function () {
+    return editor.ready(function () {
       if (opts.open) {
         $$b('#tool_open > input[type="file"]').remove();
         $$b('#tool_open').show();
@@ -29194,16 +29644,16 @@
   };
   /**
   * @param {boolean} arg
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
   editor.randomizeIds = function (arg) {
-    return svgCanvas.randomizeIds(arg);
+    svgCanvas.randomizeIds(arg);
   };
   /**
   * Auto-run after a Promise microtask.
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
@@ -29247,7 +29697,7 @@
     });
     /**
      * Sets up current preferences based on defaults.
-     * @returns {undefined}
+     * @returns {void}
      */
 
     function setupCurPrefs() {
@@ -29258,7 +29708,7 @@
     }
     /**
      * Sets up current config based on defaults.
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -29322,7 +29772,9 @@
           if (!src) {
             // urldata.source may have been null if it ended with '='
             if (qstr.includes('source=data:')) {
-              src = qstr.match(/source=(data:[^&]*)/)[1];
+              src = qstr.match(_wrapRegExp(/source=(data:[^&]*)/, {
+                src: 1
+              })).groups.src;
             }
           }
 
@@ -29357,7 +29809,7 @@
     * @param {string|Element|external:jQuery} elem
     * @param {string|external:jQuery} iconId
     * @param {Float} forcedSize Not in use
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -29374,11 +29826,11 @@
       $$b(elem).empty().append(icon);
     };
     /**
-     * @fires module:svgcanvas.SvgCanvas#event:ext-addLangData
-     * @fires module:svgcanvas.SvgCanvas#event:ext-langReady
-     * @fires module:svgcanvas.SvgCanvas#event:ext-langChanged
+     * @fires module:svgcanvas.SvgCanvas#event:ext_addLangData
+     * @fires module:svgcanvas.SvgCanvas#event:ext_langReady
+     * @fires module:svgcanvas.SvgCanvas#event:ext_langChanged
      * @fires module:svgcanvas.SvgCanvas#event:extensions_added
-     * @returns {Promise} Resolves to result of {@link module:locale.readLang}
+     * @returns {Promise<module:locale.LangAndData>} Resolves to result of {@link module:locale.readLang}
      */
 
 
@@ -29410,21 +29862,25 @@
                   ok: ok,
                   cancel: cancel
                 });
-                _context3.prev = 9;
-                _context3.next = 12;
+                setIcons(); // Wait for dbox as needed for i18n
+
+                _context3.prev = 10;
+                _context3.next = 13;
                 return Promise.all(curConfig.extensions.map(
                 /*#__PURE__*/
                 function () {
                   var _ref6 = _asyncToGenerator(
                   /*#__PURE__*/
                   regeneratorRuntime.mark(function _callee2(extname) {
-                    var extName, url, imported, _imported$name, name, init$$1, importLocale;
+                    var extName, url, imported, _imported$name, _name2, init, importLocale;
 
                     return regeneratorRuntime.wrap(function _callee2$(_context2) {
                       while (1) {
                         switch (_context2.prev = _context2.next) {
                           case 0:
-                            extName = extname.match(/^ext-(.+)\.js/);
+                            extName = extname.match(_wrapRegExp(/^ext-(.+)\.js/, {
+                              extName: 1
+                            })).groups.extName;
 
                             if (extName) {
                               _context2.next = 3;
@@ -29447,17 +29903,17 @@
                             _context2.prev = 4;
                             _context2.next = 7;
                             return importSetGlobalDefault(url, {
-                              global: 'svgEditorExtension_' + extName[1].replace(/-/g, '_')
+                              global: 'svgEditorExtension_' + extName.replace(/-/g, '_')
                             });
 
                           case 7:
                             imported = _context2.sent;
-                            _imported$name = imported.name, name = _imported$name === void 0 ? extName[1] : _imported$name, init$$1 = imported.init;
+                            _imported$name = imported.name, _name2 = _imported$name === void 0 ? extName : _imported$name, init = imported.init;
                             importLocale = getImportLocale({
                               defaultLang: langParam,
-                              defaultName: name
+                              defaultName: _name2
                             });
-                            return _context2.abrupt("return", editor.addExtension(name, init$$1 && init$$1.bind(editor), {
+                            return _context2.abrupt("return", editor.addExtension(_name2, init && init.bind(editor), {
                               $: $$b,
                               importLocale: importLocale
                             }));
@@ -29477,7 +29933,7 @@
                             return _context2.stop();
                         }
                       }
-                    }, _callee2, this, [[4, 13]]);
+                    }, _callee2, null, [[4, 13]]);
                   }));
 
                   return function (_x2) {
@@ -29485,13 +29941,13 @@
                   };
                 }()));
 
-              case 12:
+              case 13:
                 svgCanvas.bind('extensions_added',
                 /**
                 * @param {external:Window} win
                 * @param {module:svgcanvas.SvgCanvas#event:extensions_added} data
                 * @listens module:svgcanvas.SvgCanvas#event:extensions_added
-                * @returns {undefined}
+                * @returns {void}
                 */
                 function (win, data) {
                   extensionsAdded = true;
@@ -29508,28 +29964,28 @@
                   /**
                    * @param {module:svgcanvas.SvgCanvas#event:message} messageObj
                    * @fires module:svgcanvas.SvgCanvas#event:message
-                   * @returns {undefined}
+                   * @returns {void}
                    */
                   function (messageObj) {
                     svgCanvas.call('message', messageObj);
                   });
                 });
                 svgCanvas.call('extensions_added');
-                _context3.next = 19;
+                _context3.next = 20;
                 break;
 
-              case 16:
-                _context3.prev = 16;
-                _context3.t0 = _context3["catch"](9);
+              case 17:
+                _context3.prev = 17;
+                _context3.t0 = _context3["catch"](10);
                 // Todo: Report errors through the UI
                 console.log(_context3.t0); // eslint-disable-line no-console
 
-              case 19:
+              case 20:
               case "end":
                 return _context3.stop();
             }
           }
-        }, _callee3, this, [[9, 16]]);
+        }, _callee3, null, [[10, 17]]);
       }));
 
       return function extAndLocaleFunc() {
@@ -29542,7 +29998,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var setFlyoutPositions = function setFlyoutPositions() {
@@ -29566,7 +30022,7 @@
 
 
     var uaPrefix = function () {
-      var regex = /^(Moz|Webkit|Khtml|O|ms|Icab)(?=[A-Z])/;
+      var regex = /^(?:Moz|Webkit|Khtml|O|ms|Icab)(?=[A-Z])/;
       var someScript = document.getElementsByTagName('script')[0];
 
       for (var prop in someScript.style) {
@@ -29591,7 +30047,7 @@
     /**
     * @param {external:jQuery} elems
     * @param {Float} scale
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -29630,7 +30086,7 @@
     /**
     * Called internally.
     * @param {module:SVGEditor.IconSize} size
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -29836,297 +30292,309 @@
 
       setFlyoutPositions();
     };
+    /**
+     * Setup SVG icons.
+     * @returns {void}
+     */
 
-    $$b.svgIcons(curConfig.imgPath + 'svg_edit_icons.svg', {
-      w: 24,
-      h: 24,
-      id_match: false,
-      no_img: !isWebkit(),
-      // Opera & Firefox 4 gives odd behavior w/images
-      fallback_path: curConfig.imgPath,
-      fallback: {
-        logo: 'logo.png',
-        select: 'select.png',
-        select_node: 'select_node.png',
-        square: 'square.png',
-        rect: 'rect.png',
-        fh_rect: 'freehand-square.png',
-        circle: 'circle.png',
-        ellipse: 'ellipse.png',
-        fh_ellipse: 'freehand-circle.png',
-        pencil: 'fhpath.png',
-        pen: 'line.png',
-        text: 'text.png',
-        path: 'path.png',
-        add_subpath: 'add_subpath.png',
-        close_path: 'closepath.png',
-        open_path: 'openpath.png',
-        image: 'image.png',
-        zoom: 'zoom.png',
-        arrow_right: 'flyouth.png',
-        arrow_right_big: 'arrow_right_big.png',
-        arrow_down: 'dropdown.gif',
-        fill: 'fill.png',
-        stroke: 'stroke.png',
-        opacity: 'opacity.png',
-        new_image: 'clear.png',
-        save: 'save.png',
-        export: 'export.png',
-        open: 'open.png',
-        import: 'import.png',
-        docprops: 'document-properties.png',
-        source: 'source.png',
-        wireframe: 'wireframe.png',
-        undo: 'undo.png',
-        redo: 'redo.png',
-        clone: 'clone.png',
-        delete: 'delete.png',
-        go_up: 'go-up.png',
-        go_down: 'go-down.png',
-        context_menu: 'context_menu.png',
-        move_bottom: 'move_bottom.png',
-        move_top: 'move_top.png',
-        to_path: 'to_path.png',
-        link_controls: 'link_controls.png',
-        reorient: 'reorient.png',
-        group_elements: 'shape_group_elements.png',
-        ungroup: 'shape_ungroup.png',
-        unlink_use: 'unlink_use.png',
-        width: 'width.png',
-        height: 'height.png',
-        c_radius: 'c_radius.png',
-        angle: 'angle.png',
-        blur: 'blur.png',
-        fontsize: 'fontsize.png',
-        align: 'align.png',
-        align_left: 'align-left.png',
-        align_center: 'align-center.png',
-        align_right: 'align-right.png',
-        align_top: 'align-top.png',
-        align_middle: 'align-middle.png',
-        align_bottom: 'align-bottom.png',
-        linecap_butt: 'linecap_butt.png',
-        linecap_square: 'linecap_square.png',
-        linecap_round: 'linecap_round.png',
-        linejoin_miter: 'linejoin_miter.png',
-        linejoin_bevel: 'linejoin_bevel.png',
-        linejoin_round: 'linejoin_round.png',
-        eye: 'eye.png',
-        no_color: 'no_color.png',
-        ok: 'save.png',
-        cancel: 'cancel.png',
-        warning: 'warning.png',
-        node_delete: 'node_delete.png',
-        node_clone: 'node_clone.png',
-        globe_link: 'globe_link.png'
-      },
-      placement: {
-        '#logo': 'logo',
-        '#tool_clear div,#layer_new': 'new_image',
-        '#tool_save div': 'save',
-        '#tool_export div': 'export',
-        '#tool_open div div': 'open',
-        '#tool_import div div': 'import',
-        '#tool_source': 'source',
-        '#tool_docprops > div': 'docprops',
-        '#tool_wireframe': 'wireframe',
-        '#tool_undo': 'undo',
-        '#tool_redo': 'redo',
-        '#tool_select': 'select',
-        '#tool_fhpath': 'pencil',
-        '#tool_line': 'pen',
-        '#tool_rect,#tools_rect_show': 'rect',
-        '#tool_square': 'square',
-        '#tool_fhrect': 'fh_rect',
-        '#tool_ellipse,#tools_ellipse_show': 'ellipse',
-        '#tool_circle': 'circle',
-        '#tool_fhellipse': 'fh_ellipse',
-        '#tool_path': 'path',
-        '#tool_text,#layer_rename': 'text',
-        '#tool_image': 'image',
-        '#tool_zoom': 'zoom',
-        '#tool_clone,#tool_clone_multi': 'clone',
-        '#tool_node_clone': 'node_clone',
-        '#layer_delete,#tool_delete,#tool_delete_multi': 'delete',
-        '#tool_node_delete': 'node_delete',
-        '#tool_add_subpath': 'add_subpath',
-        '#tool_openclose_path': 'open_path',
-        '#tool_move_top': 'move_top',
-        '#tool_move_bottom': 'move_bottom',
-        '#tool_topath': 'to_path',
-        '#tool_node_link': 'link_controls',
-        '#tool_reorient': 'reorient',
-        '#tool_group_elements': 'group_elements',
-        '#tool_ungroup': 'ungroup',
-        '#tool_unlink_use': 'unlink_use',
-        '#tool_alignleft, #tool_posleft': 'align_left',
-        '#tool_aligncenter, #tool_poscenter': 'align_center',
-        '#tool_alignright, #tool_posright': 'align_right',
-        '#tool_aligntop, #tool_postop': 'align_top',
-        '#tool_alignmiddle, #tool_posmiddle': 'align_middle',
-        '#tool_alignbottom, #tool_posbottom': 'align_bottom',
-        '#cur_position': 'align',
-        '#linecap_butt,#cur_linecap': 'linecap_butt',
-        '#linecap_round': 'linecap_round',
-        '#linecap_square': 'linecap_square',
-        '#linejoin_miter,#cur_linejoin': 'linejoin_miter',
-        '#linejoin_round': 'linejoin_round',
-        '#linejoin_bevel': 'linejoin_bevel',
-        '#url_notice': 'warning',
-        '#layer_up': 'go_up',
-        '#layer_down': 'go_down',
-        '#layer_moreopts': 'context_menu',
-        '#layerlist td.layervis': 'eye',
-        '#tool_source_save,#tool_docprops_save,#tool_prefs_save': 'ok',
-        '#tool_source_cancel,#tool_docprops_cancel,#tool_prefs_cancel': 'cancel',
-        '#rwidthLabel, #iwidthLabel': 'width',
-        '#rheightLabel, #iheightLabel': 'height',
-        '#cornerRadiusLabel span': 'c_radius',
-        '#angleLabel': 'angle',
-        '#linkLabel,#tool_make_link,#tool_make_link_multi': 'globe_link',
-        '#zoomLabel': 'zoom',
-        '#tool_fill label': 'fill',
-        '#tool_stroke .icon_label': 'stroke',
-        '#group_opacityLabel': 'opacity',
-        '#blurLabel': 'blur',
-        '#font_sizeLabel': 'fontsize',
-        '.flyout_arrow_horiz': 'arrow_right',
-        '.dropdown button, #main_button .dropdown': 'arrow_down',
-        '#palette .palette_item:first, #fill_bg, #stroke_bg': 'no_color'
-      },
-      resize: {
-        '#logo .svg_icon': 28,
-        '.flyout_arrow_horiz .svg_icon': 5,
-        '.layer_button .svg_icon, #layerlist td.layervis .svg_icon': 14,
-        '.dropdown button .svg_icon': 7,
-        '#main_button .dropdown .svg_icon': 9,
-        '.palette_item:first .svg_icon': 15,
-        '#fill_bg .svg_icon, #stroke_bg .svg_icon': 16,
-        '.toolbar_button button .svg_icon': 16,
-        '.stroke_tool div div .svg_icon': 20,
-        '#tools_bottom label .svg_icon': 18
-      },
-      callback: function () {
-        var _callback = _asyncToGenerator(
-        /*#__PURE__*/
-        regeneratorRuntime.mark(function _callee4(icons) {
-          var tleft, minHeight, size, getStylesheetPriority, stylesheets, idx, _stylesheets;
 
-          return regeneratorRuntime.wrap(function _callee4$(_context4) {
-            while (1) {
-              switch (_context4.prev = _context4.next) {
-                case 0:
-                  getStylesheetPriority = function _ref8(stylesheetFile) {
-                    switch (stylesheetFile) {
-                      case 'jgraduate/css/jPicker.css':
-                        return 1;
+    function setIcons() {
+      $$b.svgIcons(curConfig.imgPath + 'svg_edit_icons.svg', {
+        w: 24,
+        h: 24,
+        id_match: false,
+        no_img: !isWebkit(),
+        // Opera & Firefox 4 gives odd behavior w/images
+        fallback_path: curConfig.imgPath,
+        // Todo: Set `alts: {}` with keys as the IDs in fallback set to
+        //   `uiStrings` (localized) values
+        fallback: {
+          logo: 'logo.png',
+          select: 'select.png',
+          select_node: 'select_node.png',
+          square: 'square.png',
+          rect: 'rect.png',
+          fh_rect: 'freehand-square.png',
+          circle: 'circle.png',
+          ellipse: 'ellipse.png',
+          fh_ellipse: 'freehand-circle.png',
+          pencil: 'fhpath.png',
+          pen: 'line.png',
+          text: 'text.png',
+          path: 'path.png',
+          add_subpath: 'add_subpath.png',
+          close_path: 'closepath.png',
+          open_path: 'openpath.png',
+          image: 'image.png',
+          zoom: 'zoom.png',
+          arrow_right: 'flyouth.png',
+          arrow_right_big: 'arrow_right_big.png',
+          arrow_down: 'dropdown.gif',
+          fill: 'fill.png',
+          stroke: 'stroke.png',
+          opacity: 'opacity.png',
+          new_image: 'clear.png',
+          save: 'save.png',
+          "export": 'export.png',
+          open: 'open.png',
+          "import": 'import.png',
+          docprops: 'document-properties.png',
+          source: 'source.png',
+          wireframe: 'wireframe.png',
+          undo: 'undo.png',
+          redo: 'redo.png',
+          clone: 'clone.png',
+          "delete": 'delete.png',
+          go_up: 'go-up.png',
+          go_down: 'go-down.png',
+          context_menu: 'context_menu.png',
+          move_bottom: 'move_bottom.png',
+          move_top: 'move_top.png',
+          to_path: 'to_path.png',
+          link_controls: 'link_controls.png',
+          reorient: 'reorient.png',
+          group_elements: 'shape_group_elements.png',
+          ungroup: 'shape_ungroup.png',
+          unlink_use: 'unlink_use.png',
+          width: 'width.png',
+          height: 'height.png',
+          c_radius: 'c_radius.png',
+          angle: 'angle.png',
+          blur: 'blur.png',
+          fontsize: 'fontsize.png',
+          align: 'align.png',
+          align_left: 'align-left.png',
+          align_center: 'align-center.png',
+          align_right: 'align-right.png',
+          align_top: 'align-top.png',
+          align_middle: 'align-middle.png',
+          align_bottom: 'align-bottom.png',
+          linecap_butt: 'linecap_butt.png',
+          linecap_square: 'linecap_square.png',
+          linecap_round: 'linecap_round.png',
+          linejoin_miter: 'linejoin_miter.png',
+          linejoin_bevel: 'linejoin_bevel.png',
+          linejoin_round: 'linejoin_round.png',
+          eye: 'eye.png',
+          no_color: 'no_color.png',
+          ok: 'save.png',
+          cancel: 'cancel.png',
+          warning: 'warning.png',
+          node_delete: 'node_delete.png',
+          node_clone: 'node_clone.png',
+          globe_link: 'globe_link.png'
+        },
+        placement: {
+          '#logo': 'logo',
+          '#tool_clear div,#layer_new': 'new_image',
+          '#tool_save div': 'save',
+          '#tool_export div': 'export',
+          '#tool_open div div': 'open',
+          '#tool_import div div': 'import',
+          '#tool_source': 'source',
+          '#tool_docprops > div': 'docprops',
+          '#tool_wireframe': 'wireframe',
+          '#tool_undo': 'undo',
+          '#tool_redo': 'redo',
+          '#tool_select': 'select',
+          '#tool_fhpath': 'pencil',
+          '#tool_line': 'pen',
+          '#tool_rect,#tools_rect_show': 'rect',
+          '#tool_square': 'square',
+          '#tool_fhrect': 'fh_rect',
+          '#tool_ellipse,#tools_ellipse_show': 'ellipse',
+          '#tool_circle': 'circle',
+          '#tool_fhellipse': 'fh_ellipse',
+          '#tool_path': 'path',
+          '#tool_text,#layer_rename': 'text',
+          '#tool_image': 'image',
+          '#tool_zoom': 'zoom',
+          '#tool_clone,#tool_clone_multi': 'clone',
+          '#tool_node_clone': 'node_clone',
+          '#layer_delete,#tool_delete,#tool_delete_multi': 'delete',
+          '#tool_node_delete': 'node_delete',
+          '#tool_add_subpath': 'add_subpath',
+          '#tool_openclose_path': 'open_path',
+          '#tool_move_top': 'move_top',
+          '#tool_move_bottom': 'move_bottom',
+          '#tool_topath': 'to_path',
+          '#tool_node_link': 'link_controls',
+          '#tool_reorient': 'reorient',
+          '#tool_group_elements': 'group_elements',
+          '#tool_ungroup': 'ungroup',
+          '#tool_unlink_use': 'unlink_use',
+          '#tool_alignleft, #tool_posleft': 'align_left',
+          '#tool_aligncenter, #tool_poscenter': 'align_center',
+          '#tool_alignright, #tool_posright': 'align_right',
+          '#tool_aligntop, #tool_postop': 'align_top',
+          '#tool_alignmiddle, #tool_posmiddle': 'align_middle',
+          '#tool_alignbottom, #tool_posbottom': 'align_bottom',
+          '#cur_position': 'align',
+          '#linecap_butt,#cur_linecap': 'linecap_butt',
+          '#linecap_round': 'linecap_round',
+          '#linecap_square': 'linecap_square',
+          '#linejoin_miter,#cur_linejoin': 'linejoin_miter',
+          '#linejoin_round': 'linejoin_round',
+          '#linejoin_bevel': 'linejoin_bevel',
+          '#url_notice': 'warning',
+          '#layer_up': 'go_up',
+          '#layer_down': 'go_down',
+          '#layer_moreopts': 'context_menu',
+          '#layerlist td.layervis': 'eye',
+          '#tool_source_save,#tool_docprops_save,#tool_prefs_save': 'ok',
+          '#tool_source_cancel,#tool_docprops_cancel,#tool_prefs_cancel': 'cancel',
+          '#rwidthLabel, #iwidthLabel': 'width',
+          '#rheightLabel, #iheightLabel': 'height',
+          '#cornerRadiusLabel span': 'c_radius',
+          '#angleLabel': 'angle',
+          '#linkLabel,#tool_make_link,#tool_make_link_multi': 'globe_link',
+          '#zoomLabel': 'zoom',
+          '#tool_fill label': 'fill',
+          '#tool_stroke .icon_label': 'stroke',
+          '#group_opacityLabel': 'opacity',
+          '#blurLabel': 'blur',
+          '#font_sizeLabel': 'fontsize',
+          '.flyout_arrow_horiz': 'arrow_right',
+          '.dropdown button, #main_button .dropdown': 'arrow_down',
+          '#palette .palette_item:first, #fill_bg, #stroke_bg': 'no_color'
+        },
+        resize: {
+          '#logo .svg_icon': 28,
+          '.flyout_arrow_horiz .svg_icon': 5,
+          '.layer_button .svg_icon, #layerlist td.layervis .svg_icon': 14,
+          '.dropdown button .svg_icon': 7,
+          '#main_button .dropdown .svg_icon': 9,
+          '.palette_item:first .svg_icon': 15,
+          '#fill_bg .svg_icon, #stroke_bg .svg_icon': 16,
+          '.toolbar_button button .svg_icon': 16,
+          '.stroke_tool div div .svg_icon': 20,
+          '#tools_bottom label .svg_icon': 18
+        },
+        callback: function () {
+          var _callback = _asyncToGenerator(
+          /*#__PURE__*/
+          regeneratorRuntime.mark(function _callee4(icons) {
+            var tleft, minHeight, size, getStylesheetPriority, stylesheets, idx, _stylesheets;
 
-                      case 'jgraduate/css/jGraduate.css':
-                        return 2;
+            return regeneratorRuntime.wrap(function _callee4$(_context4) {
+              while (1) {
+                switch (_context4.prev = _context4.next) {
+                  case 0:
+                    getStylesheetPriority = function _ref8(stylesheetFile) {
+                      switch (stylesheetFile) {
+                        case 'jgraduate/css/jPicker.css':
+                          return 1;
 
-                      case 'svg-editor.css':
-                        return 3;
+                        case 'jgraduate/css/jGraduate.css':
+                          return 2;
 
-                      case 'spinbtn/jQuery.SpinButton.css':
-                        return 4;
+                        case 'svg-editor.css':
+                          return 3;
 
-                      default:
-                        return Infinity;
-                    }
-                  };
+                        case 'spinbtn/jQuery.SpinButton.css':
+                          return 4;
 
-                  $$b('.toolbar_button button > svg, .toolbar_button button > img').each(function () {
-                    $$b(this).parent().prepend(this);
-                  });
-                  tleft = $$b('#tools_left');
-
-                  if (tleft.length) {
-                    minHeight = tleft.offset().top + tleft.outerHeight();
-                  }
-
-                  size = $$b.pref('iconsize');
-                  editor.setIconSize(size || ($$b(window).height() < minHeight ? 's' : 'm')); // Look for any missing flyout icons from plugins
-
-                  $$b('.tools_flyout').each(function () {
-                    var shower = $$b('#' + this.id + '_show');
-                    var sel = shower.attr('data-curopt'); // Check if there's an icon here
-
-                    if (!shower.children('svg, img').length) {
-                      var clone = $$b(sel).children().clone();
-
-                      if (clone.length) {
-                        clone[0].removeAttribute('style'); // Needed for Opera
-
-                        shower.append(clone);
+                        default:
+                          return Infinity;
                       }
-                    }
-                  });
-                  /**
-                   * Since stylesheets may be added out of order, we indicate the desired order
-                   *   for defaults and others after them (in an indeterminate order).
-                   * @param {string} stylesheetFile
-                   * @returns {Integer|PositiveInfinity}
-                   */
+                    };
 
-                  stylesheets = $$b.loadingStylesheets.sort(function (a, b) {
-                    var priorityA = getStylesheetPriority(a);
-                    var priorityB = getStylesheetPriority(b);
+                    $$b('.toolbar_button button > svg, .toolbar_button button > img').each(function () {
+                      $$b(this).parent().prepend(this);
+                    });
+                    tleft = $$b('#tools_left');
 
-                    if (priorityA === priorityB) {
-                      return 0;
+                    if (tleft.length) {
+                      minHeight = tleft.offset().top + tleft.outerHeight();
                     }
 
-                    return priorityA > priorityB;
-                  });
+                    size = $$b.pref('iconsize');
+                    editor.setIconSize(size || ($$b(window).height() < minHeight ? 's' : 'm')); // Look for any missing flyout icons from plugins
 
-                  if (curConfig.stylesheets.length) {
-                    // Ensure a copy with unique items
-                    stylesheets = _toConsumableArray(new Set(curConfig.stylesheets));
-                    idx = stylesheets.indexOf('@default');
+                    $$b('.tools_flyout').each(function () {
+                      var shower = $$b('#' + this.id + '_show');
+                      var sel = shower.attr('data-curopt'); // Check if there's an icon here
 
-                    if (idx > -1) {
-                      (_stylesheets = stylesheets).splice.apply(_stylesheets, [idx, 1].concat(_toConsumableArray($$b.loadingStylesheets)));
-                    }
-                  }
+                      if (!shower.children('svg, img').length) {
+                        var clone = $$b(sel).children().clone();
 
-                  _context4.next = 11;
-                  return loadStylesheets(stylesheets, {
-                    acceptErrors: function acceptErrors(_ref7) {
-                      var stylesheetURL = _ref7.stylesheetURL,
-                          reject = _ref7.reject,
-                          resolve = _ref7.resolve;
+                        if (clone.length) {
+                          clone[0].removeAttribute('style'); // Needed for Opera
 
-                      if ($$b.loadingStylesheets.includes(stylesheetURL)) {
-                        reject(new Error("Missing expected stylesheet: ".concat(stylesheetURL)));
-                        return;
+                          shower.append(clone);
+                        }
+                      }
+                    });
+                    /**
+                     * Since stylesheets may be added out of order, we indicate the desired order
+                     *   for defaults and others after them (in an indeterminate order).
+                     * @param {string} stylesheetFile
+                     * @returns {Integer|PositiveInfinity}
+                     */
+
+                    stylesheets = $$b.loadingStylesheets.sort(function (a, b) {
+                      var priorityA = getStylesheetPriority(a);
+                      var priorityB = getStylesheetPriority(b);
+
+                      if (priorityA === priorityB) {
+                        return 0;
                       }
 
-                      resolve();
+                      return priorityA > priorityB;
+                    });
+
+                    if (curConfig.stylesheets.length) {
+                      // Ensure a copy with unique items
+                      stylesheets = _toConsumableArray(new Set(curConfig.stylesheets));
+                      idx = stylesheets.indexOf('@default');
+
+                      if (idx > -1) {
+                        (_stylesheets = stylesheets).splice.apply(_stylesheets, [idx, 1].concat(_toConsumableArray($$b.loadingStylesheets)));
+                      }
                     }
-                  });
 
-                case 11:
-                  $$b('#svg_container')[0].style.visibility = 'visible';
-                  _context4.next = 14;
-                  return editor.runCallbacks();
+                    _context4.next = 11;
+                    return loadStylesheets(stylesheets, {
+                      acceptErrors: function acceptErrors(_ref7) {
+                        var stylesheetURL = _ref7.stylesheetURL,
+                            reject = _ref7.reject,
+                            resolve = _ref7.resolve;
 
-                case 14:
-                case "end":
-                  return _context4.stop();
+                        if ($$b.loadingStylesheets.includes(stylesheetURL)) {
+                          reject(new Error("Missing expected stylesheet: ".concat(stylesheetURL)));
+                          return;
+                        }
+
+                        resolve();
+                      }
+                    });
+
+                  case 11:
+                    $$b('#svg_container')[0].style.visibility = 'visible';
+                    _context4.next = 14;
+                    return editor.runCallbacks();
+
+                  case 14:
+                  case "end":
+                    return _context4.stop();
+                }
               }
-            }
-          }, _callee4, this);
-        }));
+            }, _callee4);
+          }));
 
-        return function callback(_x3) {
-          return _callback.apply(this, arguments);
-        };
-      }()
-    });
+          function callback(_x3) {
+            return _callback.apply(this, arguments);
+          }
+
+          return callback;
+        }()
+      });
+    }
     /**
     * @name module:SVGEditor.canvas
     * @type {module:svgcanvas.SvgCanvas}
     */
+
 
     editor.canvas = svgCanvas = new SvgCanvas(document.getElementById('svgcanvas'), curConfig);
     var palette = [// Todo: Make into configuration item?
@@ -30177,7 +30645,7 @@
     })();
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30208,9 +30676,9 @@
     }
     /**
      * This function highlights the layer passed in (by fading out the other layers).
-     * If no layer is passed in, this function restores the other layers
+     * If no layer is passed in, this function restores the other layers.
      * @param {string} [layerNameToHighlight]
-     * @returns {undefined}
+     * @returns {void}
     */
 
 
@@ -30237,7 +30705,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30251,12 +30719,13 @@
       var layer = svgCanvas.getCurrentDrawing().getNumLayers(); // we get the layers in the reverse z-order (the layer rendered on top is listed first)
 
       while (layer--) {
-        var name = drawing.getLayerName(layer);
-        var layerTr = $$b('<tr class="layer">').toggleClass('layersel', name === currentLayerName);
-        var layerVis = $$b('<td class="layervis">').toggleClass('layerinvis', !drawing.getLayerVisibility(name));
-        var layerName = $$b('<td class="layername">' + name + '</td>');
+        var _name3 = drawing.getLayerName(layer);
+
+        var layerTr = $$b('<tr class="layer">').toggleClass('layersel', _name3 === currentLayerName);
+        var layerVis = $$b('<td class="layervis">').toggleClass('layerinvis', !drawing.getLayerVisibility(_name3));
+        var layerName = $$b('<td class="layername">' + _name3 + '</td>');
         layerlist.append(layerTr.append(layerVis, layerName));
-        selLayerNames.append('<option value="' + name + '">' + name + '</option>');
+        selLayerNames.append('<option value="' + _name3 + '">' + _name3 + '</option>');
       }
 
       if (icon !== undefined) {
@@ -30299,7 +30768,7 @@
     /**
     * @param {Event} [e] Not used.
     * @param {boolean} forSaving
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var showSourceEditor = function showSourceEditor(e, forSaving) {
@@ -30321,7 +30790,7 @@
     /**
     * @param {boolean} editmode
     * @param {module:svgcanvas.SvgCanvas#event:selected} elems
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var togglePathEditMode = function togglePathEditMode(editmode, elems) {
@@ -30349,7 +30818,7 @@
      * @param {external:Window} wind
      * @param {module:svgcanvas.SvgCanvas#event:saved} svg The SVG source
      * @listens module:svgcanvas.SvgCanvas#event:saved
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -30403,7 +30872,7 @@
      * @param {external:Window} win
      * @param {module:svgcanvas.SvgCanvas#event:exported} data
      * @listens module:svgcanvas.SvgCanvas#event:exported
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -30437,7 +30906,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30453,7 +30922,7 @@
      *
      * @param {Element} opt
      * @param {boolean} changeElem
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -30511,7 +30980,7 @@
     * Unless the select toolbar button is disabled, sets the button
     * and sets the select mode and cursor styles.
     * @function module:SVGEditor.clickSelect
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30525,7 +30994,7 @@
     * Set a selected image's URL.
     * @function module:SVGEditor.setImageURL
     * @param {string} url
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30556,7 +31025,7 @@
      *
      * @param {string} color
      * @param {string} url
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -30570,7 +31039,7 @@
     /**
      * @param {PlainObject} [opts={}]
      * @param {boolean} [opts.cancelDeletes=false}]
-     * @returns {Promise} Resolves to `undefined`
+     * @returns {Promise<void>} Resolves to `undefined`
      */
 
 
@@ -30579,7 +31048,7 @@
     }
     /**
     * @param {Element} elem
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30587,8 +31056,8 @@
       _promptImgURL = _asyncToGenerator(
       /*#__PURE__*/
       regeneratorRuntime.mark(function _callee18() {
-        var _ref31,
-            _ref31$cancelDeletes,
+        var _ref32,
+            _ref32$cancelDeletes,
             cancelDeletes,
             curhref,
             url,
@@ -30598,7 +31067,7 @@
           while (1) {
             switch (_context18.prev = _context18.next) {
               case 0:
-                _ref31 = _args18.length > 0 && _args18[0] !== undefined ? _args18[0] : {}, _ref31$cancelDeletes = _ref31.cancelDeletes, cancelDeletes = _ref31$cancelDeletes === void 0 ? false : _ref31$cancelDeletes;
+                _ref32 = _args18.length > 0 && _args18[0] !== undefined ? _args18[0] : {}, _ref32$cancelDeletes = _ref32.cancelDeletes, cancelDeletes = _ref32$cancelDeletes === void 0 ? false : _ref32$cancelDeletes;
                 curhref = svgCanvas.getHref(selectedElement);
                 curhref = curhref.startsWith('data:') ? '' : curhref;
                 _context18.next = 5;
@@ -30618,7 +31087,7 @@
                 return _context18.stop();
             }
           }
-        }, _callee18, this);
+        }, _callee18);
       }));
       return _promptImgURL.apply(this, arguments);
     }
@@ -30631,7 +31100,7 @@
      *
      * @param {HTMLDivElement} [scanvas]
      * @param {Float} [zoom]
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -30796,7 +31265,7 @@
     * @function module:SVGEditor.updateCanvas
     * @param {boolean} center
     * @param {module:math.XYObject} newCtr
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -30873,8 +31342,8 @@
       }
     };
     /**
-     * @fires module:svgcanvas.SvgCanvas#event:ext-toolButtonStateUpdate
-     * @returns {undefined}
+     * @fires module:svgcanvas.SvgCanvas#event:ext_toolButtonStateUpdate
+     * @returns {void}
      */
 
 
@@ -30913,7 +31382,7 @@
       }
 
       svgCanvas.runExtensions('toolButtonStateUpdate',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-toolButtonStateUpdate} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_toolButtonStateUpdate} */
       {
         nofill: bNoFill,
         nostroke: bNoStroke
@@ -30935,7 +31404,7 @@
     * Updates the toolbar (colors, opacity, etc) based on the selected element.
     * This function also updates the opacity and id elements that are in the
     * context panel.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31006,7 +31475,7 @@
     };
     /**
     * Updates the context panel tools based on the selected element.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31233,7 +31702,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31250,7 +31719,7 @@
     var curContext = '';
     /**
     * @param {string} [title=svgCanvas.getDocumentTitle()]
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var updateTitle = function updateTitle(title) {
@@ -31268,8 +31737,8 @@
     * @param {external:Window} win
     * @param {module:svgcanvas.SvgCanvas#event:selected} elems Array of elements that were selected
     * @listens module:svgcanvas.SvgCanvas#event:selected
-    * @fires module:svgcanvas.SvgCanvas#event:ext-selectedChanged
-    * @returns {undefined}
+    * @fires module:svgcanvas.SvgCanvas#event:ext_selectedChanged
+    * @returns {void}
     */
 
 
@@ -31299,7 +31768,7 @@
       togglePathEditMode(isNode, elems);
       updateContextPanel();
       svgCanvas.runExtensions('selectedChanged',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-selectedChanged} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_selectedChanged} */
       {
         elems: elems,
         selectedElement: selectedElement,
@@ -31312,8 +31781,8 @@
      * @param {external:Window} win
      * @param {module:svgcanvas.SvgCanvas#event:transition} elems
      * @listens module:svgcanvas.SvgCanvas#event:transition
-     * @fires module:svgcanvas.SvgCanvas#event:ext-elementTransition
-     * @returns {undefined}
+     * @fires module:svgcanvas.SvgCanvas#event:ext_elementTransition
+     * @returns {void}
      */
 
 
@@ -31344,7 +31813,7 @@
       }
 
       svgCanvas.runExtensions('elementTransition',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-elementTransition} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_elementTransition} */
       {
         elems: elems
       });
@@ -31364,8 +31833,8 @@
      * @param {external:Window} win
      * @param {module:svgcanvas.SvgCanvas#event:changed} elems
      * @listens module:svgcanvas.SvgCanvas#event:changed
-     * @fires module:svgcanvas.SvgCanvas#event:ext-elementChanged
-     * @returns {undefined}
+     * @fires module:svgcanvas.SvgCanvas#event:ext_elementChanged
+     * @returns {void}
      */
 
 
@@ -31376,8 +31845,7 @@
         setSelectMode();
       }
 
-      for (var _i = 0; _i < elems.length; ++_i) {
-        var elem = elems[_i];
+      elems.forEach(function (elem) {
         var isSvgElem = elem && elem.tagName === 'svg';
 
         if (isSvgElem || isLayer(elem)) {
@@ -31392,8 +31860,7 @@
           // || elem && elem.tagName == "path" && !multiselected) { // This was added in r1430, but not sure why
           selectedElement = elem;
         }
-      }
-
+      });
       editor.showSaveWarning = true; // we update the contextual panel with potentially new
       // positional/sizing information (we DON'T want to update the
       // toolbar here as that creates an infinite loop)
@@ -31409,13 +31876,13 @@
       }
 
       svgCanvas.runExtensions('elementChanged',
-      /** @type {module:svgcanvas.SvgCanvas#event:ext-elementChanged} */
+      /** @type {module:svgcanvas.SvgCanvas#event:ext_elementChanged} */
       {
         elems: elems
       });
     };
     /**
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -31439,7 +31906,7 @@
     * @param {module:svgcanvas.SvgCanvas#event:zoomed} bbox
     * @param {boolean} autoCenter
     * @listens module:svgcanvas.SvgCanvas#event:zoomed
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31483,7 +31950,7 @@
       zoomDone();
     };
     /**
-    * @implements {module:jQuerySpinButton.ValueCallback}
+    * @type {module:jQuerySpinButton.ValueCallback}
     */
 
 
@@ -31523,7 +31990,7 @@
      * @param {external:Window} win
      * @param {module:svgcanvas.SvgCanvas#event:contextset} context
      * @listens module:svgcanvas.SvgCanvas#event:contextset
-     * @returns {undefined}
+     * @returns {void}
      */
 
     var contextChanged = function contextChanged(win, context) {
@@ -31553,7 +32020,7 @@
     };
     /**
     * Makes sure the current selected paint is available to work with.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31565,7 +32032,7 @@
     var flyoutFuncs = {};
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var setFlyoutTitles = function setFlyoutTitles() {
@@ -31585,8 +32052,8 @@
 
     var allHolders = {};
     /**
-     * @param {PlainObject.<string, module:SVGEditor.ToolButton>} holders Key is a selector
-     * @returns {undefined}
+     * @param {PlainObject<string, module:SVGEditor.ToolButton>} holders Key is a selector
+     * @returns {void}
      */
 
     var setupFlyouts = function setupFlyouts(holders) {
@@ -31628,7 +32095,7 @@
           /**
            * Clicking the icon in flyout should set this set's icon.
            * @param {Event} ev
-           * @returns {undefined}
+           * @returns {boolean}
            */
 
 
@@ -31746,13 +32213,13 @@
     /**
     * @param {string} id
     * @param {external:jQuery} child
-    * @returns {undefined}
+    * @returns {external:jQuery}
     */
 
 
     var makeFlyoutHolder = function makeFlyoutHolder(id, child) {
       var div = $$b('<div>', {
-        class: 'tools_flyout',
+        "class": 'tools_flyout',
         id: id
       }).appendTo('#svg_editor').append(child);
       return div;
@@ -31766,7 +32233,7 @@
     * @param {boolean} opts.seticon
     * @param {boolean} opts.multiclick
     * @todo Combine this with `addDropDown` or find other way to optimize.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -31848,7 +32315,7 @@
      * @param {external:Window} win
      * @param {module:svgcanvas.SvgCanvas#event:extension_added} ext
      * @listens module:svgcanvas.SvgCanvas#event:extension_added
-     * @returns {Promise|undefined} Resolves to `undefined`
+     * @returns {Promise<void>|void} Resolves to `undefined`
      */
 
     var extAdded =
@@ -31857,7 +32324,7 @@
       var _ref13 = _asyncToGenerator(
       /*#__PURE__*/
       regeneratorRuntime.mark(function _callee5(win, ext) {
-        var cbCalled, resizeDone, lang, prepResize, runCallback, btnSelects, svgicons, fallbackObj, placementObj, holders;
+        var cbCalled, resizeDone, lang, prepResize, runCallback, btnSelects, svgicons, fallbackObj, altsObj, placementObj, holders;
         return regeneratorRuntime.wrap(function _callee5$(_context5) {
           while (1) {
             switch (_context5.prev = _context5.next) {
@@ -31920,7 +32387,7 @@
               case 14:
                 /**
                 *
-                * @returns {undefined}
+                * @returns {void}
                 */
                 runCallback = function runCallback() {
                   if (ext.callback && !cbCalled) {
@@ -31934,10 +32401,10 @@
                 * @typedef {PlainObject} module:SVGEditor.ContextTool
                 * @property {string} panel The ID of the existing panel to which the tool is being added. Required.
                 * @property {string} id The ID of the actual tool element. Required.
-                * @property {PlainObject.<string, external:jQuery.Function>|PlainObject.<"change", external:jQuery.Function>} events DOM event names keyed to associated functions. Example: `{change () { alert('Option was changed') } }`. "change" event is one specifically handled for the "button-select" type. Required.
+                * @property {PlainObject<string, external:jQuery.Function>|PlainObject<"change", external:jQuery.Function>} events DOM event names keyed to associated functions. Example: `{change () { alert('Option was changed') } }`. "change" event is one specifically handled for the "button-select" type. Required.
                 * @property {string} title The tooltip text that will appear when the user hovers over the tool. Required.
                 * @property {"tool_button"|"select"|"button-select"|"input"|string} type The type of tool being added. Expected.
-                * @property {PlainObject.<string, string>} [options] List of options and their labels for select tools. Example: `{1: 'One', 2: 'Two', all: 'All' }`. Required by "select" tools.
+                * @property {PlainObject<string, string>} [options] List of options and their labels for select tools. Example: `{1: 'One', 2: 'Two', all: 'All' }`. Required by "select" tools.
                 * @property {string} [container_id] The ID to be given to the tool's container element.
                 * @property {string} [defval] Default value
                 * @property {string|Integer} [colnum] Added as part of the option list class.
@@ -32047,7 +32514,7 @@
                   break;
                 }
 
-                fallbackObj = {}, placementObj = {}, holders = {};
+                fallbackObj = {}, altsObj = {}, placementObj = {}, holders = {};
                 /**
                 * @typedef {GenericArray} module:SVGEditor.KeyArray
                 * @property {string} 0 The key to bind (on `keydown`)
@@ -32064,7 +32531,7 @@
                 * @property {string} id A unique identifier for this button. If SVG icons are used, this must match the ID used in the icon file. Required.
                 * @property {"mode_flyout"|"mode"|"context"|"app_menu"} type Type of button. Required.
                 * @property {string} title The tooltip text that will appear when the user hovers over the icon. Required.
-                * @property {PlainObject.<string, external:jQuery.Function>|PlainObject.<"click", external:jQuery.Function>} events DOM event names with associated functions. Example: `{click () { alert('Button was clicked') } }`. Click is used with `includeWith` and `type` of "mode_flyout" (and "mode"); any events may be added if `list` is not present. Expected.
+                * @property {PlainObject<string, external:jQuery.Function>|PlainObject<"click", external:jQuery.Function>} events DOM event names with associated functions. Example: `{click () { alert('Button was clicked') } }`. Click is used with `includeWith` and `type` of "mode_flyout" (and "mode"); any events may be added if `list` is not present. Expected.
                 * @property {string} panel The ID of the context panel to be included, if type is "context". Required only if type is "context".
                 * @property {string} icon The file path to the raster version of the icon image source. Required only if no `svgicons` is supplied from [ExtensionInitResponse]{@link module:svgcanvas.ExtensionInitResponse}.
                 * @property {string} [svgicon] If absent, will utilize the button "id"; used to set "placement" on the `svgIcons` call
@@ -32092,9 +32559,10 @@
                   var icon;
 
                   if (!svgicons) {
-                    icon = $$b('<img src="' + btn.icon + '">');
+                    icon = $$b('<img src="' + btn.icon + (btn.title ? '" alt="' + btn.title : '') + '">');
                   } else {
                     fallbackObj[id] = btn.icon;
+                    altsObj[id] = btn.title;
                     var svgicon = btn.svgicon || btn.id;
 
                     if (btn.type === 'app_menu') {
@@ -32139,7 +32607,7 @@
                       if ($$b(parent).children().eq(btn.position).length) {
                         $$b(parent).children().eq(btn.position).before(button);
                       } else {
-                        $$b(parent).children().last().before(button);
+                        $$b(parent).children().last().after(button);
                       }
                     } else {
                       button.appendTo(parent);
@@ -32158,7 +32626,7 @@
                         // Create flyout placeholder
                         tlsId = refBtn[0].id.replace('tool_', 'tools_');
                         showBtn = refBtn.clone().attr('id', tlsId + '_show').append($$b('<div>', {
-                          class: 'flyout_arrow_horiz'
+                          "class": 'flyout_arrow_horiz'
                         }));
                         refBtn.before(showBtn); // Create a flyout div
 
@@ -32221,7 +32689,7 @@
                       // Create flyout placeholder
                       _tlsId = refBtn[0].id.replace('tool_', 'tools_');
                       showBtn = refBtn.clone().attr('id', _tlsId + '_show').append($$b('<div>', {
-                        class: 'flyout_arrow_horiz'
+                        "class": 'flyout_arrow_horiz'
                       }));
                       refBtn.before(showBtn); // Create a flyout div
 
@@ -32335,7 +32803,7 @@
                 return _context5.stop();
             }
           }
-        }, _callee5, this);
+        }, _callee5);
       }));
 
       return function extAdded(_x4, _x5) {
@@ -32412,7 +32880,7 @@
      * @param {false} centerInfo.center
      * @param {module:math.XYObject} centerInfo.newCtr
      * @listens module:svgcanvas.SvgCanvas#event:updateCanvas
-     * @returns {undefined}
+     * @returns {void}
      */
     function (win, _ref15) {
       var center = _ref15.center,
@@ -32448,14 +32916,14 @@
     setBackground($$b.pref('bkgd_color'), $$b.pref('bkgd_url'));
     $$b('#image_save_opts input').val([$$b.pref('img_save')]);
     /**
-    * @implements {module:jQuerySpinButton.ValueCallback}
+    * @type {module:jQuerySpinButton.ValueCallback}
     */
 
     var changeRectRadius = function changeRectRadius(ctl) {
       svgCanvas.setRectRadius(ctl.value);
     };
     /**
-    * @implements {module:jQuerySpinButton.ValueCallback}
+    * @type {module:jQuerySpinButton.ValueCallback}
     */
 
 
@@ -32463,7 +32931,7 @@
       svgCanvas.setFontSize(ctl.value);
     };
     /**
-    * @implements {module:jQuerySpinButton.ValueCallback}
+    * @type {module:jQuerySpinButton.ValueCallback}
     */
 
 
@@ -32477,7 +32945,7 @@
       svgCanvas.setStrokeWidth(val);
     };
     /**
-    * @implements {module:jQuerySpinButton.ValueCallback}
+    * @type {module:jQuerySpinButton.ValueCallback}
     */
 
 
@@ -32488,7 +32956,7 @@
     /**
     * @param {external:jQuery.fn.SpinButton} ctl Spin Button
     * @param {string} [val=ctl.value]
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -32509,7 +32977,7 @@
     * @param {external:jQuery.fn.SpinButton} ctl Spin Button
     * @param {string} [val=ctl.value]
     * @param {boolean} noUndo
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -32561,7 +33029,7 @@
               confirmStr = uiStrings$1.notification.QmoveElemsToLayer.replace('%s', destLayer);
               /**
               * @param {boolean} ok
-              * @returns {undefined}
+              * @returns {void}
               */
 
               moveToLayer = function moveToLayer(ok) {
@@ -32763,7 +33231,7 @@
       });
       /**
       * @param {boolean} active
-      * @returns {undefined}
+      * @returns {void}
       */
 
       editor.setPanning = function (active) {
@@ -32857,14 +33325,14 @@
      * @callback module:SVGEditor.DropDownCallback
      * @param {external:jQuery.Event} ev See {@link http://api.jquery.com/Types/#Event}
      * @listens external:jQuery.Event
-     * @returns {undefined|boolean} Calls `preventDefault()` and `stopPropagation()`
+     * @returns {void|boolean} Calls `preventDefault()` and `stopPropagation()`
     */
 
     /**
      * @param {Element|string} elem DOM Element or selector
      * @param {module:SVGEditor.DropDownCallback} callback Mouseup callback
      * @param {boolean} dropUp
-     * @returns {undefined}
+     * @returns {void}
     */
 
 
@@ -33006,7 +33474,7 @@
       var inp;
       /**
       *
-      * @returns {undefined}
+      * @returns {void}
       */
 
       var unfocus = function unfocus() {
@@ -33029,7 +33497,7 @@
     })();
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33040,7 +33508,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33051,7 +33519,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33062,7 +33530,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33073,7 +33541,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33084,7 +33552,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33095,7 +33563,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33106,7 +33574,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33117,7 +33585,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33128,7 +33596,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33140,7 +33608,7 @@
     };
     /**
     * @param {Float} multiplier
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33155,7 +33623,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33167,7 +33635,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33178,7 +33646,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33190,7 +33658,7 @@
     /**
     * Delete is a contextual tool that only appears in the ribbon if
     * an element has been selected.
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33201,7 +33669,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33212,7 +33680,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33223,7 +33691,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33235,7 +33703,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33246,7 +33714,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33257,7 +33725,7 @@
     };
     /**
     * @param {"Up"|"Down"} dir
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33268,18 +33736,18 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
-    var convertToPath$$1 = function convertToPath$$1() {
+    var convertToPath = function convertToPath() {
       if (!isNullish(selectedElement)) {
         svgCanvas.convertToPath();
       }
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33290,7 +33758,7 @@
     };
     /**
     *
-    * @returns {Promise} Resolves to `undefined`
+    * @returns {Promise<void>} Resolves to `undefined`
     */
 
 
@@ -33325,7 +33793,7 @@
                 return _context7.stop();
             }
           }
-        }, _callee7, this);
+        }, _callee7);
       }));
 
       return function makeHyperlink() {
@@ -33335,7 +33803,7 @@
     /**
     * @param {Float} dx
     * @param {Float} dy
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33353,7 +33821,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33364,7 +33832,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33375,7 +33843,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33386,7 +33854,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33398,7 +33866,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33407,7 +33875,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33416,7 +33884,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33426,7 +33894,7 @@
     /**
     * @param {0|1} cw
     * @param {Integer} step
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33444,8 +33912,8 @@
       updateContextPanel();
     };
     /**
-     * @fires module:svgcanvas.SvgCanvas#event:ext-onNewDocument
-     * @returns {Promise} Resolves to `undefined`
+     * @fires module:svgcanvas.SvgCanvas#event:ext_onNewDocument
+     * @returns {Promise<void>} Resolves to `undefined`
      */
 
 
@@ -33491,7 +33959,7 @@
                 return _context8.stop();
             }
           }
-        }, _callee8, this);
+        }, _callee8);
       }));
 
       return function clickClear() {
@@ -33522,7 +33990,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33538,7 +34006,7 @@
     var loadingURL;
     /**
     *
-    * @returns {Promise} Resolves to `undefined`
+    * @returns {Promise<void>} Resolves to `undefined`
     */
 
     var clickExport =
@@ -33639,7 +34107,7 @@
                 return _context9.stop();
             }
           }
-        }, _callee9, this);
+        }, _callee9);
       }));
 
       return function clickExport() {
@@ -33650,7 +34118,7 @@
      * By default, svgCanvas.open() is a no-op. It is up to an extension
      *  mechanism (opera widget, etc.) to call `setCustomHandlers()` which
      *  will make it do something.
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -33659,7 +34127,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33668,7 +34136,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33680,7 +34148,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33692,7 +34160,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33706,7 +34174,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33715,7 +34183,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33725,7 +34193,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33757,7 +34225,7 @@
     var preferences = false;
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var showDocProperties = function showDocProperties() {
@@ -33783,7 +34251,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33822,7 +34290,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33833,7 +34301,7 @@
     };
     /**
     *
-    * @returns {Promise} Resolves to `undefined`
+    * @returns {Promise<void>} Resolves to `undefined`
     */
 
 
@@ -33896,7 +34364,7 @@
                 return _context10.stop();
             }
           }
-        }, _callee10, this);
+        }, _callee10);
       }));
 
       return function saveSourceEditor() {
@@ -33905,7 +34373,7 @@
     }();
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33918,7 +34386,7 @@
     };
     /**
     *
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -33978,7 +34446,7 @@
     /**
     * Save user preferences based on current values in the UI.
     * @function module:SVGEditor.savePreferences
-    * @returns {undefined}
+    * @returns {Promise<void>}
     */
 
 
@@ -34016,17 +34484,22 @@
 
             case 11:
               // set icon size
-              setIconSize($$b('#iconsize').val()); // set grid setting
+              setIconSize($$b('#iconsize').val());
+              /* eslint-disable require-atomic-updates */
+              // set grid setting
 
               curConfig.gridSnapping = $$b('#grid_snapping_on')[0].checked;
               curConfig.snappingStep = $$b('#grid_snapping_step').val();
               curConfig.gridColor = $$b('#grid_color').val();
               curConfig.showRulers = $$b('#show_rulers')[0].checked;
+              /* eslint-enable require-atomic-updates */
+
               $$b('#rulers').toggle(curConfig.showRulers);
 
               if (curConfig.showRulers) {
                 updateRulers();
-              }
+              } // eslint-disable-next-line require-atomic-updates
+
 
               curConfig.baseUnit = $$b('#base_unit').val();
               svgCanvas.setConfig(curConfig);
@@ -34038,13 +34511,13 @@
               return _context11.stop();
           }
         }
-      }, _callee11, this);
+      }, _callee11);
     }));
 
     var resetScrollPos = $$b.noop;
     /**
     *
-    * @returns {Promise} Resolves to `undefined`
+    * @returns {Promise<void>} Resolves to `undefined`
     */
 
     var cancelOverlays =
@@ -34117,7 +34590,7 @@
                 return _context12.stop();
             }
           }
-        }, _callee12, this);
+        }, _callee12);
       }));
 
       return function cancelOverlays() {
@@ -34213,10 +34686,10 @@
 
     if (isMac() && !window.opera) {
       var shortcutButtons = ['tool_clear', 'tool_save', 'tool_source', 'tool_undo', 'tool_redo', 'tool_clone'];
-      var _i2 = shortcutButtons.length;
+      var _i = shortcutButtons.length;
 
-      while (_i2--) {
-        var button = document.getElementById(shortcutButtons[_i2]);
+      while (_i--) {
+        var button = document.getElementById(shortcutButtons[_i]);
 
         if (button) {
           var title = button.title;
@@ -34229,7 +34702,7 @@
     * @param {external:jQuery} elem
     * @todo Go back to the color boxes having white background-color and then setting
     *  background-image to none.png (otherwise partially transparent gradients look weird)
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -34341,11 +34814,11 @@
                 var childs = selectedElement.getElementsByTagName('*');
                 var gPaint = null;
 
-                for (var _i3 = 0, len = childs.length; _i3 < len; _i3++) {
-                  var elem = childs[_i3];
+                for (var _i2 = 0, len = childs.length; _i2 < len; _i2++) {
+                  var elem = childs[_i2];
                   var p = elem.getAttribute(type);
 
-                  if (_i3 === 0) {
+                  if (_i2 === 0) {
                     gPaint = p;
                   } else if (gPaint !== p) {
                     gPaint = null;
@@ -34539,11 +35012,11 @@
               return _context13.stop();
           }
         }
-      }, _callee13, this);
+      }, _callee13);
     })));
     /**
      *
-     * @returns {undefined}
+     * @returns {void}
      */
 
     function deleteLayer() {
@@ -34559,7 +35032,7 @@
     }
     /**
      *
-     * @returns {undefined}
+     * @returns {Promise<void>}
      */
 
 
@@ -34568,7 +35041,7 @@
     }
     /**
      *
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -34615,7 +35088,7 @@
                 return _context19.stop();
             }
           }
-        }, _callee19, this);
+        }, _callee19);
       }));
       return _cloneLayer.apply(this, arguments);
     }
@@ -34631,7 +35104,7 @@
     }
     /**
      * @param {Integer} pos
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -34697,7 +35170,7 @@
               return _context14.stop();
           }
         }
-      }, _callee14, this);
+      }, _callee14);
     })));
     var SIDEPANEL_MAXWIDTH = 300;
     var SIDEPANEL_OPENWIDTH = 150;
@@ -34706,8 +35179,8 @@
         allowmove = false;
     /**
      * @param {Float} delta
-     * @fires module:svgcanvas.SvgCanvas#event:ext-workareaResized
-     * @returns {undefined}
+     * @fires module:svgcanvas.SvgCanvas#event:ext_workareaResized
+     * @returns {void}
      */
 
     var changeSidePanelWidth = function changeSidePanelWidth(delta) {
@@ -34720,7 +35193,7 @@
     };
     /**
     * @param {Event} evt
-    * @returns {undefined}
+    * @returns {void}
     */
 
 
@@ -34753,7 +35226,7 @@
     /**
      * If width is non-zero, then fully close it; otherwise fully open it.
      * @param {boolean} close Forces the side panel closed
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -34799,7 +35272,7 @@
 
     $$b(window).bind('load resize', centerCanvas);
     /**
-     * @implements {module:jQuerySpinButton.StepCallback}
+     * @type {module:jQuerySpinButton.StepCallback}
      */
 
     function stepFontSize(elem, step) {
@@ -34830,7 +35303,7 @@
       return sugVal;
     }
     /**
-     * @implements {module:jQuerySpinButton.StepCallback}
+     * @type {module:jQuerySpinButton.StepCallback}
      */
 
 
@@ -35108,7 +35581,7 @@
         key: 'ctrl+shift+['
       }, {
         sel: '#tool_topath',
-        fn: convertToPath$$1,
+        fn: convertToPath,
         evt: 'click'
       }, {
         sel: '#tool_make_link,#tool_make_link_multi',
@@ -35329,7 +35802,7 @@
         /** @lends module:SVGEditor~Actions */
 
         /**
-         * @returns {undefined}
+         * @returns {void}
          */
         setAll: function setAll() {
           var flyouts = {};
@@ -35445,7 +35918,7 @@
         },
 
         /**
-         * @returns {undefined}
+         * @returns {void}
          */
         setTitles: function setTitles() {
           $$b.each(keyAssocs, function (keyval, sel) {
@@ -35651,11 +36124,11 @@
       }
     });
     /**
-    * Implements {@see module:jQueryContextMenu.jQueryContextMenuListener}
+    * Implements {@see module:jQueryContextMenu.jQueryContextMenuListener}.
     * @param {"dupe"|"delete"|"merge_down"|"merge_all"} action
     * @param {external:jQuery} el
     * @param {{x: Float, y: Float, docX: Float, docY: Float}} pos
-    * @returns {undefined}
+    * @returns {void}
     */
 
     var lmenuFunc = function lmenuFunc(action, el, pos) {
@@ -35696,7 +36169,7 @@
     $$b('#cmenu_canvas li').disableContextMenu();
     canvMenu.enableContextMenuItems('#delete,#cut,#copy');
     /**
-     * @returns {undefined}
+     * @returns {void}
      */
 
     function enableOrDisableClipboard() {
@@ -35743,7 +36216,7 @@
       return uiStrings$1;
     };
     /**
-    * @returns {Promise} Resolves to boolean indicating `true` if there were no changes
+    * @returns {Promise<boolean>} Resolves to boolean indicating `true` if there were no changes
     *  and `false` after the user confirms.
     */
 
@@ -35760,7 +36233,7 @@
     /**
      *
      * @param {Event} e
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -35771,7 +36244,7 @@
     /**
      *
      * @param {Event} e
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -35782,7 +36255,7 @@
     /**
      *
      * @param {Event} e
-     * @returns {undefined}
+     * @returns {void}
      */
 
 
@@ -35798,7 +36271,7 @@
     if (window.FileReader) {
       /**
       * @param {Event} e
-      * @returns {undefined}
+      * @returns {void}
       */
       var importImage = function importImage(e) {
         $$b.process_cancel(uiStrings$1.notification.loadingImage);
@@ -35849,10 +36322,10 @@
             var result = _ref27.target.result;
 
             /**
-            * Insert the new image until we know its dimensions
+            * Insert the new image until we know its dimensions.
             * @param {Float} width
             * @param {Float} height
-            * @returns {undefined}
+            * @returns {void}
             */
             var insertNewImage = function insertNewImage(width, height) {
               var newImage = svgCanvas.addSVGElementFromJson({
@@ -35895,75 +36368,83 @@
       workarea[0].addEventListener('dragover', onDragOver);
       workarea[0].addEventListener('dragleave', onDragLeave);
       workarea[0].addEventListener('drop', importImage);
-      var open = $$b('<input type="file">').click(
+      var open = $$b('<input type="file">').change(
       /*#__PURE__*/
-      _asyncToGenerator(
-      /*#__PURE__*/
-      regeneratorRuntime.mark(function _callee16() {
-        var ok, reader;
-        return regeneratorRuntime.wrap(function _callee16$(_context16) {
-          while (1) {
-            switch (_context16.prev = _context16.next) {
-              case 0:
-                _context16.next = 2;
-                return editor.openPrep();
+      function () {
+        var _ref28 = _asyncToGenerator(
+        /*#__PURE__*/
+        regeneratorRuntime.mark(function _callee16(e) {
+          var ok, reader;
+          return regeneratorRuntime.wrap(function _callee16$(_context16) {
+            while (1) {
+              switch (_context16.prev = _context16.next) {
+                case 0:
+                  _context16.next = 2;
+                  return editor.openPrep();
 
-              case 2:
-                ok = _context16.sent;
+                case 2:
+                  ok = _context16.sent;
 
-                if (ok) {
-                  _context16.next = 5;
-                  break;
-                }
+                  if (ok) {
+                    _context16.next = 5;
+                    break;
+                  }
 
-                return _context16.abrupt("return");
+                  return _context16.abrupt("return");
 
-              case 5:
-                svgCanvas.clear();
+                case 5:
+                  svgCanvas.clear();
 
-                if (this.files.length === 1) {
-                  $$b.process_cancel(uiStrings$1.notification.loadingImage);
-                  reader = new FileReader();
+                  if (this.files.length === 1) {
+                    $$b.process_cancel(uiStrings$1.notification.loadingImage);
+                    reader = new FileReader();
 
-                  reader.onloadend =
-                  /*#__PURE__*/
-                  function () {
-                    var _ref29 = _asyncToGenerator(
+                    reader.onloadend =
                     /*#__PURE__*/
-                    regeneratorRuntime.mark(function _callee15(e) {
-                      return regeneratorRuntime.wrap(function _callee15$(_context15) {
-                        while (1) {
-                          switch (_context15.prev = _context15.next) {
-                            case 0:
-                              _context15.next = 2;
-                              return loadSvgString(e.target.result);
+                    function () {
+                      var _ref30 = _asyncToGenerator(
+                      /*#__PURE__*/
+                      regeneratorRuntime.mark(function _callee15(_ref29) {
+                        var target;
+                        return regeneratorRuntime.wrap(function _callee15$(_context15) {
+                          while (1) {
+                            switch (_context15.prev = _context15.next) {
+                              case 0:
+                                target = _ref29.target;
+                                _context15.next = 3;
+                                return loadSvgString(target.result);
 
-                            case 2:
-                              updateCanvas();
+                              case 3:
+                                updateCanvas();
 
-                            case 3:
-                            case "end":
-                              return _context15.stop();
+                              case 4:
+                              case "end":
+                                return _context15.stop();
+                            }
                           }
-                        }
-                      }, _callee15, this);
-                    }));
+                        }, _callee15);
+                      }));
 
-                    return function (_x6) {
-                      return _ref29.apply(this, arguments);
-                    };
-                  }();
+                      return function (_x7) {
+                        return _ref30.apply(this, arguments);
+                      };
+                    }();
 
-                  reader.readAsText(this.files[0]);
-                }
+                    reader.readAsText(this.files[0]);
+                  }
 
-              case 7:
-              case "end":
-                return _context16.stop();
+                case 7:
+                case "end":
+                  return _context16.stop();
+              }
             }
-          }
-        }, _callee16, this);
-      })));
+          }, _callee16, this);
+        }));
+
+        return function (_x6) {
+          return _ref28.apply(this, arguments);
+        };
+      }());
       $$b('#tool_open').show().prepend(open);
       var imgImport = $$b('<input type="file">').change(importImage);
       $$b('#tool_import').show().prepend(imgImport);
@@ -35978,19 +36459,17 @@
     * @function module:SVGEditor.setLang
     * @param {string} lang The language code
     * @param {module:locale.LocaleStrings} allStrings See {@tutorial LocaleDocs}
-    * @fires module:svgcanvas.SvgCanvas#event:ext-langReady
-    * @fires module:svgcanvas.SvgCanvas#event:ext-langChanged
-    * @returns {Promise} A Promise which resolves to `undefined`
+    * @fires module:svgcanvas.SvgCanvas#event:ext_langReady
+    * @fires module:svgcanvas.SvgCanvas#event:ext_langChanged
+    * @returns {Promise<void>} A Promise which resolves to `undefined`
     */
 
     var setLang = editor.setLang =
     /*#__PURE__*/
     function () {
-      var _ref30 = _asyncToGenerator(
+      var _ref31 = _asyncToGenerator(
       /*#__PURE__*/
       regeneratorRuntime.mark(function _callee17(lang, allStrings) {
-        var _this = this;
-
         var oldLayerName, renameLayer, elems;
         return regeneratorRuntime.wrap(function _callee17$(_context17) {
           while (1) {
@@ -36008,6 +36487,13 @@
                 return _context17.abrupt("return");
 
               case 5:
+                // Todo: Remove `allStrings.lang` property in locale in
+                //   favor of just `lang`?
+                document.documentElement.lang = allStrings.lang; // lang;
+                // Todo: Add proper RTL Support!
+                // Todo: Use RTL detection instead and take out of locales?
+                // document.documentElement.dir = allStrings.dir;
+
                 $$b.extend(uiStrings$1, allStrings); // const notif = allStrings.notification; // Currently unused
                 // $.extend will only replace the given strings
 
@@ -36023,11 +36509,11 @@
 
 
                 if (!extsPreLang.length) {
-                  _context17.next = 17;
+                  _context17.next = 18;
                   break;
                 }
 
-                _context17.next = 14;
+                _context17.next = 15;
                 return Promise.all(extsPreLang.map(function (ext) {
                   loadedExtensionNames.push(ext.name);
                   return ext.langReady({
@@ -36040,15 +36526,16 @@
                   });
                 }));
 
-              case 14:
+              case 15:
+                // eslint-disable-next-line require-atomic-updates
                 extsPreLang.length = 0;
-                _context17.next = 18;
+                _context17.next = 19;
                 break;
 
-              case 17:
+              case 18:
                 loadedExtensionNames.forEach(function (loadedExtensionName) {
-                  _this.runExtension(loadedExtensionName, 'langReady',
-                  /** @type {module:svgcanvas.SvgCanvas#event:ext-langReady} */
+                  svgCanvas.runExtension(loadedExtensionName, 'langReady',
+                  /** @type {module:svgcanvas.SvgCanvas#event:ext_langReady} */
                   {
                     lang: lang,
                     uiStrings: uiStrings$1,
@@ -36059,9 +36546,9 @@
                   });
                 });
 
-              case 18:
+              case 19:
                 svgCanvas.runExtensions('langChanged',
-                /** @type {module:svgcanvas.SvgCanvas#event:ext-langChanged} */
+                /** @type {module:svgcanvas.SvgCanvas#event:ext_langChanged} */
                 lang); // Update flyout tooltips
 
                 setFlyoutTitles(); // Copy title for certain tool elements
@@ -36080,16 +36567,16 @@
                   $$b('#tool_pos' + this.id.substr(10))[0].title = this.title;
                 });
 
-              case 23:
+              case 24:
               case "end":
                 return _context17.stop();
             }
           }
-        }, _callee17, this);
+        }, _callee17);
       }));
 
-      return function (_x7, _x8) {
-        return _ref30.apply(this, arguments);
+      return function (_x8, _x9) {
+        return _ref31.apply(this, arguments);
       };
     }();
 
@@ -36103,7 +36590,7 @@
       * returning an object with a `data` property set to its locales (to be
       * merged with regular locales).
       * @param {string} langParam
-      * @fires module:svgcanvas.SvgCanvas#event:ext-addLangData
+      * @fires module:svgcanvas.SvgCanvas#event:ext_addLangData
       * @todo Can we forego this in favor of `langReady` (or forego `langReady`)?
       * @returns {module:locale.AddLangExtensionLocaleData[]}
       */
@@ -36113,7 +36600,7 @@
          * @function
          * @type {module:svgcanvas.ExtensionVarBuilder}
          * @param {string} name
-         * @returns {module:svgcanvas.SvgCanvas#event:ext-addLangData}
+         * @returns {module:svgcanvas.SvgCanvas#event:ext_addLangData}
          */
         function (name) {
           // We pass in a function as we don't know the extension name here when defining this `addLangData` method
@@ -36133,13 +36620,15 @@
     if (document.location.protocol === 'file:') {
       setTimeout(extAndLocaleFunc, 100);
     } else {
-      // Returns a promise (if we wanted to fire 'extensions-loaded' event, potentially useful to hide interface as some extension locales are only available after this)
+      // Returns a promise (if we wanted to fire 'extensions-loaded' event,
+      //   potentially useful to hide interface as some extension locales
+      //   are only available after this)
       extAndLocaleFunc();
     }
   };
   /**
   * @callback module:SVGEditor.ReadyCallback
-  * @returns {Promise|undefined}
+  * @returns {Promise<void>|void}
   */
 
   /**
@@ -36147,7 +36636,7 @@
   *   to be invoked immediately if it is already ready--i.e.,
   *   if `runCallbacks` has been run).
   * @param {module:SVGEditor.ReadyCallback} cb Callback to be queued to invoke
-  * @returns {Promise} Resolves when all callbacks, including the supplied have resolved
+  * @returns {Promise<ArbitraryCallbackResult>} Resolves when all callbacks, including the supplied have resolved
   */
 
 
@@ -36166,7 +36655,7 @@
   };
   /**
   * Invokes the callbacks previous set by `svgEditor.ready`
-  * @returns {Promise} Resolves to `undefined` if all callbacks succeeded and rejects otherwise
+  * @returns {Promise<void>} Resolves to `undefined` if all callbacks succeeded and rejects otherwise
   */
 
 
@@ -36181,9 +36670,9 @@
           case 0:
             _context20.prev = 0;
             _context20.next = 3;
-            return Promise.all(callbacks.map(function (_ref33) {
-              var _ref34 = _slicedToArray(_ref33, 1),
-                  cb = _ref34[0];
+            return Promise.all(callbacks.map(function (_ref34) {
+              var _ref35 = _slicedToArray(_ref34, 1),
+                  cb = _ref35[0];
 
               return cb(); // eslint-disable-line promise/prefer-await-to-callbacks
             }));
@@ -36195,18 +36684,18 @@
           case 5:
             _context20.prev = 5;
             _context20.t0 = _context20["catch"](0);
-            callbacks.forEach(function (_ref35) {
-              var _ref36 = _slicedToArray(_ref35, 3),
-                  reject = _ref36[2];
+            callbacks.forEach(function (_ref36) {
+              var _ref37 = _slicedToArray(_ref36, 3),
+                  reject = _ref37[2];
 
               reject();
             });
             throw _context20.t0;
 
           case 9:
-            callbacks.forEach(function (_ref37) {
-              var _ref38 = _slicedToArray(_ref37, 2),
-                  resolve = _ref38[1];
+            callbacks.forEach(function (_ref38) {
+              var _ref39 = _slicedToArray(_ref38, 2),
+                  resolve = _ref39[1];
 
               resolve();
             });
@@ -36217,20 +36706,20 @@
             return _context20.stop();
         }
       }
-    }, _callee20, this, [[0, 5]]);
+    }, _callee20, null, [[0, 5]]);
   }));
   /**
   * @param {string} str The SVG string to load
   * @param {PlainObject} [opts={}]
   * @param {boolean} [opts.noAlert=false] Option to avoid alert to user and instead get rejected promise
-  * @returns {Promise}
+  * @returns {Promise<void>}
   */
 
   editor.loadFromString = function (str) {
-    var _ref39 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-        noAlert = _ref39.noAlert;
+    var _ref40 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+        noAlert = _ref40.noAlert;
 
-    editor.ready(
+    return editor.ready(
     /*#__PURE__*/
     _asyncToGenerator(
     /*#__PURE__*/
@@ -36265,13 +36754,13 @@
               return _context21.stop();
           }
         }
-      }, _callee21, this, [[0, 5]]);
+      }, _callee21, null, [[0, 5]]);
     })));
   };
   /**
   * Not presently in use.
   * @param {PlainObject} featList
-  * @returns {undefined}
+  * @returns {void}
   */
 
 
@@ -36283,7 +36772,7 @@
   /**
    * @callback module:SVGEditor.URLLoadCallback
    * @param {boolean} success
-   * @returns {undefined}
+   * @returns {void}
    */
 
   /**
@@ -36291,16 +36780,16 @@
   * @param {PlainObject} [opts={}] May contain properties: `cache`, `callback`
   * @param {boolean} [opts.cache]
   * @param {boolean} [opts.noAlert]
-  * @returns {Promise} Resolves to `undefined` or rejects upon bad loading of
+  * @returns {Promise<void>} Resolves to `undefined` or rejects upon bad loading of
   *   the SVG (or upon failure to parse the loaded string) when `noAlert` is
   *   enabled
   */
 
 
   editor.loadFromURL = function (url) {
-    var _ref41 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-        cache = _ref41.cache,
-        noAlert = _ref41.noAlert;
+    var _ref42 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+        cache = _ref42.cache,
+        noAlert = _ref42.noAlert;
 
     return editor.ready(function () {
       return new Promise(function (resolve, reject) {
@@ -36344,15 +36833,15 @@
   * @param {string} str The Data URI to base64-decode (if relevant) and load
   * @param {PlainObject} [opts={}]
   * @param {boolean} [opts.noAlert]
-  * @returns {Promise} Resolves to `undefined` and rejects if loading SVG string fails and `noAlert` is enabled
+  * @returns {Promise<void>} Resolves to `undefined` and rejects if loading SVG string fails and `noAlert` is enabled
   */
 
 
   editor.loadFromDataURI = function (str) {
-    var _ref42 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-        noAlert = _ref42.noAlert;
+    var _ref43 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+        noAlert = _ref43.noAlert;
 
-    editor.ready(function () {
+    return editor.ready(function () {
       var base64 = false;
       var pre = str.match(/^data:image\/svg\+xml;base64,/);
 
@@ -36377,11 +36866,11 @@
    * @param {module:svgcanvas.ExtensionInitCallback} init Config to be invoked on this module
    * @param {module:svgcanvas.ExtensionInitArgs} initArgs
    * @throws {Error} If called too early
-   * @returns {Promise} Resolves to `undefined`
+   * @returns {Promise<void>} Resolves to `undefined`
   */
 
 
-  editor.addExtension = function (name, init$$1, initArgs) {
+  editor.addExtension = function (name, init, initArgs) {
     // Note that we don't want this on editor.ready since some extensions
     // may want to run before then (like server_opensave).
     // $(function () {
@@ -36389,7 +36878,7 @@
       throw new Error('Extension added too early');
     }
 
-    return svgCanvas.addExtension.call(this, name, init$$1, initArgs); // });
+    return svgCanvas.addExtension.call(this, name, init, initArgs); // });
   }; // Defer injection to wait out initial menu processing. This probably goes
   //    away once all context menu behavior is brought to context menu.
 
@@ -36401,15 +36890,15 @@
   var messageQueue = [];
   /**
    * @param {PlainObject} info
-   * @param {Any} info.data
+   * @param {any} info.data
    * @param {string} info.origin
    * @fires module:svgcanvas.SvgCanvas#event:message
-   * @returns {undefined}
+   * @returns {void}
    */
 
-  var messageListener = function messageListener(_ref43) {
-    var data = _ref43.data,
-        origin = _ref43.origin;
+  var messageListener = function messageListener(_ref44) {
+    var data = _ref44.data,
+        origin = _ref44.origin;
     // eslint-disable-line no-shadow
     // console.log('data, origin, extensionsAdded', data, origin, extensionsAdded);
     var messageObj = {
@@ -36455,7 +36944,7 @@
             return _context22.stop();
         }
       }
-    }, _callee22, this, [[0, 6]]);
+    }, _callee22, null, [[0, 6]]);
   }))();
 
   //  TO BUILD AN IIFE VERSION OF THIS FILE (AS CAN WORK ON OLDER BROWSERS),

@@ -12,39 +12,57 @@ module.exports = {
     browser: true
   },
   settings: {
-    polyfills: ["url", "promises", "fetch", "queryselector"],
+    polyfills: [
+      "Array.isArray",
+      "Blob",
+      "console",
+      "Date.now",
+      "document.body",
+      "document.evaluate",
+      "document.head",
+      "document.importNode",
+      "document.querySelector", "document.querySelectorAll",
+      "DOMParser",
+      "Error",
+      "fetch",
+      "FileReader",
+      "history.pushState",
+      "history.replaceState",
+      "JSON",
+      "location.href",
+      "location.origin",
+      "MutationObserver",
+      "Object.assign", "Object.defineProperty", "Object.defineProperties",
+      "Object.getOwnPropertyDescriptor",
+      "Object.entries", "Object.keys", "Object.values",
+      "Promise",
+      "Set",
+      "Uint8Array",
+      "URL",
+      "window.getComputedStyle",
+      "window.postMessage",
+      "window.scrollX", "window.scrollY",
+      "XMLHttpRequest",
+      "XMLSerializer"
+    ],
     jsdoc: {
       additionalTagNames: {
         // In case we need to extend
         customTags: []
       },
-      tagNamePreference: {
-        arg: "param",
-        return: "returns"
-      },
-      allowOverrideWithoutParam: true,
-      allowImplementsWithoutParam: true,
-      allowAugmentsExtendsWithoutParam: true,
-      // For `jsdoc/check-examples` in `ash-nazg`
-      matchingFileName: "dummy.md",
-      rejectExampleCodeRegex: "^`",
+      augmentsExtendsReplacesDocs: true,
+      // Todo: Figure out why this is not working and why seem to have to
+      //    disable for all Markdown:
+      /*
+      baseConfig: {
+        rules: {
+          "no-multi-spaces": "off"
+        }
+      }
+      */
     }
   },
   overrides: [
-    // These would otherwise currently break because of these issues:
-    //  1. `event:` https://github.com/eslint/doctrine/issues/221 and https://github.com/Kuniwak/jsdoctypeparser/pull/49 with https://github.com/Kuniwak/jsdoctypeparser/issues/47
-    //  1. `@implements`/`@augments`/`@extends`/`@override`: https://github.com/eslint/doctrine/issues/222
-    {
-      files: [
-        "test/utilities_test.js", "editor/svg-editor.js", "editor/svgcanvas.js",
-        "editor/coords.js",
-        "editor/extensions/ext-eyedropper.js", "editor/extensions/ext-webappfind.js"
-      ],
-      rules: {
-        "jsdoc/valid-types": "off",
-        "valid-jsdoc": "off"
-      }
-    },
     // Locales have no need for importing outside of SVG-Edit
     {
       files: [
@@ -81,6 +99,18 @@ module.exports = {
         "import/unambiguous": ["off"]
       }
     },
+    {
+      files: ['test/browser-bugs/**'],
+      rules: {
+        'no-var': 'off'
+      }
+    },
+    {
+      files: ['**/*.html'],
+      rules: {
+        'import/unambiguous': 'off'
+      }
+    },
     // Our Markdown rules (and used for JSDoc examples as well, by way of
     //   our use of `matchingFileName` in conjunction with
     //   `jsdoc/check-examples` within `ash-nazg`)
@@ -94,14 +124,24 @@ module.exports = {
         "padded-blocks": ["off"],
         "import/unambiguous": ["off"],
         "import/no-unresolved": ["off"],
-        "node/no-missing-import": ["off"]
+        "node/no-missing-import": ["off"],
+        "no-multi-spaces": "off",
+        "sonarjs/no-all-duplicated-branches": "off",
+        "no-alert": "off",
+        // Disable until may fix https://github.com/gajus/eslint-plugin-jsdoc/issues/211
+        "indent": "off"
       }
     },
-    // Dis-apply Node rules mistakenly giving errors with browser files
+    // Dis-apply Node rules mistakenly giving errors with browser files,
+    //  and treating Node global `root` as being present for shadowing
     {
-      files: ["editor/**", "test/**"],
+      files: ["editor/**", "test/**", "screencasts/**"],
+      globals: {
+        root: "off"
+      },
       rules: {
-        "node/no-unsupported-features/node-builtins": ["off"]
+        "node/no-unsupported-features/es-syntax": "off",
+        "node/no-unsupported-features/node-builtins": "off"
       }
     },
     // We want console in tests!
@@ -115,15 +155,21 @@ module.exports = {
       // Node files
       files: [
         "docs/jsdoc-config.js",
-        "build-html.js", "jsdoc-check-overly-generic-types.js",
+        "build-html.js",
         "rollup.config.js", "rollup-config.config.js"
       ],
       env: {
         node: true,
       },
+      globals: {
+        require: true
+      },
       rules: {
-        "node/no-unpublished-import": ["off"],
-        "node/no-unsupported-features/es-syntax": ["off"]
+        // We can't put Rollup in npmignore or user can't get access,
+        //  and we have too many modules to add to `peerDependencies`
+        //  so this rule can know them to be available, so we instead
+        //  disable
+        "node/no-unpublished-import": "off"
       }
     },
     {
@@ -132,23 +178,26 @@ module.exports = {
       parserOptions: {
         sourceType: "script"
       },
+      globals: {
+        "module": false
+      },
       rules: {
-        "import/no-commonjs": "off"
+        "import/no-commonjs": "off",
+        "strict": "off"
       }
     }
   ],
   rules: {
     // Override these `ash-nazg/sauron` rules which are difficult for us
     //   to apply at this time
-    "capitalized-comments": ["off"],
-    complexity: ["off"],
-    "default-case": ["off"],
-    "require-unicode-regexp": ["off"],
-    "no-magic-numbers": ["off"],
-    "no-warning-comments": ["off"],
+    "default-case": "off",
+    "require-unicode-regexp": "off",
     "max-len": ["off", {
       ignoreUrls: true,
       ignoreRegExpLiterals: true
-    }]
+    }],
+    "unicorn/prefer-query-selector": "off",
+    "unicorn/prefer-node-append": "off",
+    "unicorn/no-zero-fractions": "off"
   }
 };

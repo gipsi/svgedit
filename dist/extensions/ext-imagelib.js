@@ -237,7 +237,7 @@ var svgEditorExtension_imagelib = (function () {
                 });
                 /**
                 *
-                * @returns {undefined}
+                * @returns {void}
                 */
 
                 pending = {};
@@ -365,6 +365,7 @@ var svgEditorExtension_imagelib = (function () {
                             return $.process_cancel(message);
 
                           case 39:
+                            // eslint-disable-next-line require-atomic-updates
                             transferStopped = true; // Should a message be sent back to the frame?
 
                             $('#dialog_box').hide();
@@ -533,7 +534,7 @@ var svgEditorExtension_imagelib = (function () {
                             return _context.stop();
                         }
                       }
-                    }, _callee, this, [[3, 20]]);
+                    }, _callee, null, [[3, 20]]);
                   }));
 
                   return function (_x2) {
@@ -542,7 +543,7 @@ var svgEditorExtension_imagelib = (function () {
                 }(), true);
                 /**
                 * @param {boolean} show
-                * @returns {undefined}
+                * @returns {void}
                 */
 
                 buttons = [{
@@ -573,9 +574,11 @@ var svgEditorExtension_imagelib = (function () {
         }, _callee2, this);
       }));
 
-      return function init(_x) {
+      function init(_x) {
         return _init.apply(this, arguments);
-      };
+      }
+
+      return init;
     }()
   };
 

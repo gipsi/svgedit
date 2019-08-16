@@ -2,8 +2,8 @@
  * Expects an out of bounds `INDEX_SIZE_ERR` exception.
  * @param {GenericObject} obj
  * @param {GenericCallback} fn
- * @param {Any} arg1
- * @returns {undefined}
+ * @param {any} arg1
+ * @returns {void}
  */
 function expectOutOfBoundsException (obj, fn, arg1) {
   const expected = true;

@@ -34,7 +34,7 @@ export default {
       display: 'none'
     });
     canvBG.append(canvasGrid);
-
+    const gridDefs = svgdoc.createElementNS(NS.SVG, 'defs');
     // grid-pattern
     const gridPattern = svgdoc.createElementNS(NS.SVG, 'pattern');
     assignAttributes(gridPattern, {
@@ -54,7 +54,8 @@ export default {
       height: 100
     });
     gridPattern.append(gridimg);
-    $('#svgroot defs').append(gridPattern);
+    gridDefs.append(gridPattern);
+    $('#canvasGrid').append(gridDefs);
 
     // grid-box
     const gridBox = svgdoc.createElementNS(NS.SVG, 'rect');
@@ -73,7 +74,7 @@ export default {
     /**
      *
      * @param {Float} zoom
-     * @returns {undefined}
+     * @returns {void}
      */
     function updateGrid (zoom) {
       // TODO: Try this with <line> elements, then compare performance difference
@@ -82,13 +83,10 @@ export default {
       // Calculate the main number interval
       const rawM = 100 / uMulti;
       let multi = 1;
-      for (let i = 0; i < intervals.length; i++) {
-        const num = intervals[i];
+      intervals.some((num) => {
         multi = num;
-        if (rawM <= num) {
-          break;
-        }
-      }
+        return rawM <= num;
+      });
       const bigInt = multi * uMulti;
 
       // Set the canvas size to the width of the container
@@ -129,7 +127,7 @@ export default {
 
     /**
      *
-     * @returns {undefined}
+     * @returns {void}
      */
     function gridUpdate () {
       if (showGrid) {

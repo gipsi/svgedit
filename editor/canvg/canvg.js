@@ -1,4 +1,4 @@
-/* eslint-disable new-cap, class-methods-use-this */
+/* eslint-disable new-cap, class-methods-use-this, prefer-named-capture-group */
 // Todo: Compare with latest canvg (add any improvements of ours) and add full JSDocs (denoting links to standard APIs and which are custom): https://github.com/canvg/canvg
 /**
  * canvg.js - Javascript SVG parser and renderer on Canvas
@@ -13,7 +13,7 @@ import {canvasRGBA} from '../external/stackblur-canvas/dist/stackblur-es.js';
 
 /**
  * Whether a value is `null` or `undefined`.
- * @param {Any} val
+ * @param {any} val
  * @returns {boolean}
  */
 const isNullish = (val) => {
@@ -47,7 +47,7 @@ const isNullish = (val) => {
 * @param {HTMLCanvasElement|string} target canvas element or the id of a canvas element
 * @param {string|XMLDocument} s - svg string, url to svg file, or xml document
 * @param {module:canvg.CanvgOptions} [opts] Optional hash of options
-* @returns {Promise} All the function after the first render is completed with dom
+* @returns {Promise<XMLDocument|XMLDocument[]>} All the function after the first render is completed with dom
 */
 export const canvg = function (target, s, opts) {
   // no parameters
@@ -90,12 +90,14 @@ export const canvg = function (target, s, opts) {
   return svg.load(ctx, s);
 };
 
+/* eslint-disable jsdoc/check-types */
 /**
 * @param {module:canvg.CanvgOptions} opts
-* @returns {Object}
+* @returns {object}
 * @todo Flesh out exactly what object is returned here (after updating to latest and reincluding our changes here and those of StackBlur)
 */
 function build (opts) {
+  /* eslint-enable jsdoc/check-types */
   const svg = {opts};
 
   svg.FRAMERATE = 30;
@@ -2364,8 +2366,10 @@ function build (opts) {
       [...node.childNodes].forEach(({nodeValue}) => {
         css += nodeValue;
       });
-      css = css.replace(/(\/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\/)|(^[\s]*\/\/.*)/gm, ''); // remove comments
-      css = svg.compressSpaces(css); // replace whitespace
+      // remove comments
+      css = css.replace(/(\/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+\/)|(^[\s]*\/\/.*)/gm, ''); // eslint-disable-line unicorn/no-unsafe-regex
+      // replace whitespace
+      css = svg.compressSpaces(css);
       const cssDefs = css.split('}');
       cssDefs.forEach((cssDef) => {
         if (svg.trim(cssDef) !== '') {
@@ -2597,7 +2601,7 @@ function build (opts) {
   * @param {Float} width
   * @param {Float} height
   * @param {Integer} rgba
-  * @returns {undefined}
+  * @returns {Integer}
   */
   function imGet (img, x, y, width, height, rgba) {
     return img[y * width * 4 + x * 4 + rgba];
@@ -2611,7 +2615,7 @@ function build (opts) {
   * @param {Float} height
   * @param {Integer} rgba
   * @param {Float} val
-  * @returns {undefined}
+  * @returns {void}
   */
   function imSet (img, x, y, width, height, rgba, val) {
     img[y * width * 4 + x * 4 + rgba] = val;

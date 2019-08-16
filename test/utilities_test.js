@@ -65,21 +65,21 @@ const mockCount = {
 
 /**
  * Increments clear seleciton count for mock test.
- * @returns {undefined}
+ * @returns {void}
  */
 function mockClearSelection () {
   mockCount.clearSelection++;
 }
 /**
 * Increments add selection count for mock test.
- * @returns {undefined}
+ * @returns {void}
  */
 function mockAddToSelection () {
   mockCount.addToSelection++;
 }
 /**
 * Increments add command to history count for mock test.
- * @returns {undefined}
+ * @returns {void}
  */
 function mockAddCommandToHistory () {
   mockCount.addCommandToHistory++;
@@ -290,7 +290,7 @@ QUnit.test('Test getPathDFromElement', function (assert) {
 QUnit.test('Test getBBoxOfElementAsPath', function (assert) {
   /**
    * Wrap `utilities.getBBoxOfElementAsPath` to convert bbox to object for testing.
-   * @implements {module:utilities.getBBoxOfElementAsPath}
+   * @type {module:utilities.getBBoxOfElementAsPath}
    */
   function getBBoxOfElementAsPath (elem, addSVGElementFromJson, pathActions) {
     const bbox = utilities.getBBoxOfElementAsPath(elem, addSVGElementFromJson, pathActions);

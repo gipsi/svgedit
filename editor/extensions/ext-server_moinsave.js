@@ -18,13 +18,18 @@ export default {
     const saveSvgAction = '/+modify';
 
     // Create upload target (hidden iframe)
-    /* const target = */ $('<iframe name="output_frame" src="#"/>').hide().appendTo('body');
+    //  Hiding by size instead of display to avoid FF console errors
+    //    with `getBBox` in browser.js `supportsPathBBox_`)
+    /* const target = */ $(
+      `<iframe name="output_frame" title="${strings.hiddenframe}"
+        style="width: 0; height: 0;" src="#"/>`
+    ).appendTo('body');
 
     svgEditor.setCustomHandlers({
       async save (win, data) {
         const svg = '<?xml version="1.0"?>\n' + data;
         const qstr = $.param.querystring();
-        const name = qstr.substr(9).split('/+get/')[1];
+        const [, name] = qstr.substr(9).split('/+get/');
         const svgData = encode64(svg);
         if (!$('#export_canvas').length) {
           $('<canvas>', {id: 'export_canvas'}).hide().appendTo('body');
@@ -40,11 +45,12 @@ export default {
           method: 'post',
           action: saveSvgAction + '/' + name,
           target: 'output_frame'
-        }).append('<input type="hidden" name="png_data" value="' + pngData + '">')
-          .append('<input type="hidden" name="filepath" value="' + svgData + '">')
-          .append('<input type="hidden" name="filename" value="' + 'drawing.svg">')
-          .append('<input type="hidden" name="contenttype" value="application/x-svgdraw">')
-          .appendTo('body')
+        }).append(`
+          <input type="hidden" name="png_data" value="${pngData}">
+          <input type="hidden" name="filepath" value="${svgData}">
+          <input type="hidden" name="filename" value="drawing.svg">
+          <input type="hidden" name="contenttype" value="application/x-svgdraw">
+        `).appendTo('body')
           .submit().remove();
         $.alert(strings.saved);
         top.window.location = '/' + name;

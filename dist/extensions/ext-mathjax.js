@@ -40,8 +40,8 @@ var svgEditorExtension_mathjax = (function () {
   /**
    * Add any of the whitelisted attributes to the script tag.
    * @param {HTMLScriptElement} script
-   * @param {PlainObject.<string, string>} atts
-   * @returns {undefined}
+   * @param {PlainObject<string, string>} atts
+   * @returns {void}
    */
 
 
@@ -67,7 +67,7 @@ var svgEditorExtension_mathjax = (function () {
       var script = document.createElement('script');
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
       function scriptOnError() {
@@ -76,7 +76,7 @@ var svgEditorExtension_mathjax = (function () {
       }
       /**
        *
-       * @returns {undefined}
+       * @returns {void}
        */
 
 
@@ -214,7 +214,7 @@ var svgEditorExtension_mathjax = (function () {
                 });
                 /**
                  *
-                 * @returns {undefined}
+                 * @returns {void}
                  */
 
                 buttons = [{
@@ -306,12 +306,14 @@ var svgEditorExtension_mathjax = (function () {
                                 return _context.stop();
                             }
                           }
-                        }, _callee, this, [[7, 13]]);
+                        }, _callee, null, [[7, 13]]);
                       }));
 
-                      return function click() {
+                      function click() {
                         return _click.apply(this, arguments);
-                      };
+                      }
+
+                      return click;
                     }()
                   }
                 }];
@@ -359,9 +361,11 @@ var svgEditorExtension_mathjax = (function () {
         }, _callee2, this);
       }));
 
-      return function init(_x) {
+      function init(_x) {
         return _init.apply(this, arguments);
-      };
+      }
+
+      return init;
     }()
   };
 

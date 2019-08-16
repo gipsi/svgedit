@@ -68,7 +68,7 @@ var svgEditorExtension_webappfind = (function () {
                 * @param {module:svgcanvas.SvgCanvas#event:message} data
                 * @listens module:svgcanvas.SvgCanvas#event:message
                 * @throws {Error} Unexpected event type
-                * @returns {undefined}
+                * @returns {void}
                 */
                 function (win, _ref2) {
                   var data = _ref2.data,
@@ -166,9 +166,11 @@ var svgEditorExtension_webappfind = (function () {
         }, _callee, this);
       }));
 
-      return function init(_x) {
+      function init(_x) {
         return _init.apply(this, arguments);
-      };
+      }
+
+      return init;
     }()
   };
 

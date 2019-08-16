@@ -205,7 +205,7 @@ var svgEditorExtension_shapes = (function () {
                 curLib = library.basic;
                 /**
                 *
-                * @returns {undefined}
+                * @returns {void}
                 */
 
                 buttons = [{
@@ -412,9 +412,11 @@ var svgEditorExtension_shapes = (function () {
         }, _callee, this);
       }));
 
-      return function init(_x) {
+      function init(_x) {
         return _init.apply(this, arguments);
-      };
+      }
+
+      return init;
     }()
   };
 
